@@ -1,0 +1,14 @@
+# ADR-0005 — M14 por reglas primero; IA solo para lo no resuelto
+- **Estado:** aceptada (v1.11, 07-10-2026)
+- **Contexto:**
+  - El índice de entidades alimenta los módulos M1, M5, M7, M10, M13 y M19.
+  - Leer con IA unos 1.300 documentos costaría unos 4 millones de tokens.
+  - Estos índices tienen requisitos de privacidad estrictos.
+- **Decisión:**
+  - La extracción se hace por reglas, sin IA: fechas, organismos, CIF de personas jurídicas con dígito de control, razón social, expediente, factura, referencia catastral, proyecto por la ruta y tipo.
+  - Nunca se extraen DNI/NIE, IBAN, teléfonos, correos, nombres de personas físicas ni importes. En `09_PERSONAL_SENSIBLE` solo se indexan el tipo y la fecha.
+  - Claude lee como máximo 10 documentos `SIN_ENTIDADES` por hora.
+- **Consecuencias:**
+  - El coste es mínimo y el resultado, determinista y comprobable (15 pruebas).
+  - La cobertura semántica es menor que con IA.
+  - La elección del modelo para los casos dudosos queda pendiente de un piloto comparativo.

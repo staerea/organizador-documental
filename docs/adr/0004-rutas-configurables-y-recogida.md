@@ -1,0 +1,14 @@
+# ADR-0004 — Rutas configurables y recogida de solicitudes en la carpeta de descargas
+- **Estado:** aceptada (v1.11, 07-10-2026)
+- **Contexto:**
+  - El usuario quiere que la raíz y la carpeta de descargas de los CSV sean configurables.
+  - El 06-10-2026, 18 solicitudes de borrado se quedaron en `Downloads` porque el navegador decide dónde descarga; una página `file://` no puede elegir esa carpeta.
+  - El usuario pide además renombrar `nuevos` a `INPUT`.
+- **Decisión:**
+  - `config_plataforma.csv` define `RaizDocumental`, `CarpetaEntrada` y `CarpetaSolicitudes` (`%DESCARGAS_NAVEGADOR%`, que se resuelve con la carpeta conocida de Windows).
+  - El vigilante recoge las solicitudes de esas carpetas, además de la raíz y la entrada.
+  - Las solicitudes ya procesadas que reaparecen se archivan como repetidas.
+  - La entrada se migra sola a partir de `entrada_historial.txt`.
+- **Consecuencias:**
+  - Aumenta la superficie: un CSV ajeno en Descargas podría pedir borrados. Queda acotado por la verificación de ADR-0002: solo afectaría a copias redundantes, recuperables.
+  - Cambiar la raíz copia `_ORGANIZACION` sin borrar la anterior.

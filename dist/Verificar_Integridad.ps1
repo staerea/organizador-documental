@@ -9,7 +9,33 @@ param([string]$Raiz = (Split-Path $PSScriptRoot -Parent), [ValidateSet('Alerta',
 # v1.9: en modo Alerta, 06_DESARROLLO_SOFTWARE (miles de archivos) solo se recorre una vez cada $Intervalo06Min minutos,
 #       y el recorrido completo se corta si supera $PresupuestoSeg segundos (se registra, no se alerta).
 $ErrorActionPreference = 'Stop'
+# --- v1.11: configuracion de la plataforma (config_plataforma.csv junto a los scripts) ---
+function Get-ConfigPlataforma([string]$dir) {
+  $c = [ordered]@{ RaizDocumental = ''; CarpetaEntrada = 'INPUT'; CarpetaSolicitudes = '%DESCARGAS_NAVEGADOR%' }
+  $p = Join-Path $dir 'config_plataforma.csv'
+  if (Test-Path -LiteralPath $p) {
+    try { foreach ($f in @(Import-Csv -LiteralPath $p -Delimiter ';' -Encoding UTF8)) {
+        $k = "$($f.Clave)".Trim(); if ($k -and $c.Contains($k)) { $c[$k] = "$($f.Valor)".Trim() } } } catch { } }
+  if (-not $c.CarpetaEntrada -or $c.CarpetaEntrada -match '[\\/:*?"<>|]' -or $c.CarpetaEntrada -match '^(\.|_|\d\d_)') { $c.CarpetaEntrada = 'INPUT' }
+  return $c }
+function Get-CarpetaDescargasNavegador {
+  # Carpeta "Descargas" de Windows (la que usan por defecto Edge, Chrome y Firefox); admite redireccion a otro disco.
+  $d = $null
+  try { $v = (Get-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders' -ErrorAction Stop).'{374DE290-123F-4565-9164-39C4925E467B}'
+        if ($v) { $d = [Environment]::ExpandEnvironmentVariables($v) } } catch { }
+  if (-not $d -and $env:USERPROFILE) { $d = Join-Path $env:USERPROFILE 'Downloads' }
+  if (-not $d -and $env:HOME) { $d = Join-Path $env:HOME 'Downloads' }
+  return $d }
+function Resolve-CarpetasSolicitudes([string]$valor) {
+  $r = New-Object System.Collections.Generic.List[string]
+  foreach ($x in ("$valor" -split '\|')) { $x = $x.Trim(); if (-not $x) { continue }
+    if ($x -ieq '%DESCARGAS_NAVEGADOR%') { $x = Get-CarpetaDescargasNavegador } else { $x = [Environment]::ExpandEnvironmentVariables($x) }
+    if ($x -and -not $r.Contains($x)) { $r.Add($x) } }
+  return ,$r }
 $org = Join-Path $Raiz '_ORGANIZACION'; $man = Join-Path $org 'manifiesto_documental.csv'
+# v1.11: la carpeta de entrada (INPUT o la configurada) y sus nombres anteriores no cuentan como cambios masivos
+$excluirTop = @('_ORGANIZACION', 'nuevos', (Get-ConfigPlataforma $org).CarpetaEntrada)
+$hpI = Join-Path $org 'entrada_historial.txt'; if (Test-Path -LiteralPath $hpI) { $excluirTop += @(Get-Content -LiteralPath $hpI -Encoding UTF8 | ForEach-Object { "$_".Trim() } | Where-Object { $_ }) }
 $pausa = Join-Path $org 'vigilante.pausa'; $alertaTxt = Join-Path $Raiz 'ALERTA_INTEGRIDAD.txt'
 $logPath = Join-Path $org ("integridad_{0}.csv" -f (Get-Date -Format 'yyyyMM'))
 
@@ -68,7 +94,7 @@ if ($Modo -eq 'Alerta') {
   #         para que ninguna carpeta (99, _DUPLICADOS_REVISAR, 11...) quede sistematicamente sin revisar. 06 va siempre al final.
   $marcaRot = Join-Path $org 'integridad_rotacion.txt'; $inicioRot = ''
   if (Test-Path -LiteralPath $marcaRot) { try { $inicioRot = (Get-Content -LiteralPath $marcaRot -Raw).Trim() } catch { } }
-  $resto = @(Get-ChildItem -LiteralPath $Raiz -Directory -Force | Where-Object { $_.Name -notmatch '^(_ORGANIZACION|nuevos)$' -and $_.Name -ne '06_DESARROLLO_SOFTWARE' } |
+  $resto = @(Get-ChildItem -LiteralPath $Raiz -Directory -Force | Where-Object { $excluirTop -notcontains $_.Name -and $_.Name -ne '06_DESARROLLO_SOFTWARE' } |
              Sort-Object Name)
   $k = -1; for ($i = 0; $i -lt $resto.Count; $i++) { if ($resto[$i].Name -eq $inicioRot) { $k = $i; break } }
   if ($k -gt 0) { $resto = @($resto[$k..($resto.Count-1)]) + @($resto[0..($k-1)]) }

@@ -1,0 +1,11 @@
+# ADR-0003 — Repositorio con src/ y dist/ generados
+- **Estado:** aceptada (v1.11, 07-10-2026)
+- **Contexto:** el código estaba repartido entre Drive (en producción), los anexos del skill y un espacio de trabajo temporal. No había control de versiones.
+- **Decisión:**
+  - repositorio privado `staerea/organizador-documental`;
+  - el código editable va en `src/`, con el código común insertado mediante el marcador `#COMUN#` para que los scripts sigan siendo autónomos;
+  - `dist/` se genera con `tools/build.py` en UTF-8 con BOM y CRLF, que es lo que exige PowerShell 5.1;
+  - pruebas portables en `tests/`;
+  - un bundle git en Drive como respaldo sin GitHub;
+  - los anexos de código salen del skill.
+- **Consecuencias:** hay trazabilidad, reversión por etiqueta y un SKILL.md más ligero. Cada versión requiere un paso de construcción y desplegar `dist/`.

@@ -1,0 +1,8 @@
+# Los scripts se guardan tal cual (UTF-8 con BOM y CRLF) para Windows PowerShell 5.1
+dist/** -text
+src/*.ps1 text eol=crlf
+src/*.bat text eol=crlf
+config/*.csv -text
+*.py text eol=lf
+*.md text eol=lf
+*.sh text eol=lf

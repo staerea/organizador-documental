@@ -6,9 +6,34 @@
     v1.10.1: presupuesto de tiempo (-PresupuestoMin): si se agota, las filas que faltan se escriben en <plan>_resto_<hora>.csv
              junto al plan (planes_pendientes) y se aplican en la pasada siguiente, sin rozar el corte de 30 min de la tarea.
              Los archivos de mas de -MaxHashMB (1 GB) se mueven sin calcular su SHA-256 en ese momento (en Google Drive en
-             streaming un hash de 4,5 GB tardo ~20 min); su fila del manifiesto queda con VersionSkill '1.10.1-sha-diferido'.   #>
+             streaming un hash de 4,5 GB tardo ~20 min); su fila del manifiesto queda con VersionSkill '1.10.1-sha-diferido'.
+    v1.11: si un Origen cita una carpeta de entrada anterior (p. ej. nuevos\... tras renombrarla a INPUT) y ya no existe,
+           se busca en la carpeta de entrada actual (config_plataforma.csv / entrada_historial.txt).   #>
 param([Parameter(Mandatory=$true)][string]$Plan, [string]$Raiz = (Split-Path $PSScriptRoot -Parent), [switch]$Ejecutar, [int]$PresupuestoMin = 12, [int64]$MaxHashMB = 1024)
 $ErrorActionPreference = 'Stop'
+# --- v1.11: configuracion de la plataforma (config_plataforma.csv junto a los scripts) ---
+function Get-ConfigPlataforma([string]$dir) {
+  $c = [ordered]@{ RaizDocumental = ''; CarpetaEntrada = 'INPUT'; CarpetaSolicitudes = '%DESCARGAS_NAVEGADOR%' }
+  $p = Join-Path $dir 'config_plataforma.csv'
+  if (Test-Path -LiteralPath $p) {
+    try { foreach ($f in @(Import-Csv -LiteralPath $p -Delimiter ';' -Encoding UTF8)) {
+        $k = "$($f.Clave)".Trim(); if ($k -and $c.Contains($k)) { $c[$k] = "$($f.Valor)".Trim() } } } catch { } }
+  if (-not $c.CarpetaEntrada -or $c.CarpetaEntrada -match '[\\/:*?"<>|]' -or $c.CarpetaEntrada -match '^(\.|_|\d\d_)') { $c.CarpetaEntrada = 'INPUT' }
+  return $c }
+function Get-CarpetaDescargasNavegador {
+  # Carpeta "Descargas" de Windows (la que usan por defecto Edge, Chrome y Firefox); admite redireccion a otro disco.
+  $d = $null
+  try { $v = (Get-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders' -ErrorAction Stop).'{374DE290-123F-4565-9164-39C4925E467B}'
+        if ($v) { $d = [Environment]::ExpandEnvironmentVariables($v) } } catch { }
+  if (-not $d -and $env:USERPROFILE) { $d = Join-Path $env:USERPROFILE 'Downloads' }
+  if (-not $d -and $env:HOME) { $d = Join-Path $env:HOME 'Downloads' }
+  return $d }
+function Resolve-CarpetasSolicitudes([string]$valor) {
+  $r = New-Object System.Collections.Generic.List[string]
+  foreach ($x in ("$valor" -split '\|')) { $x = $x.Trim(); if (-not $x) { continue }
+    if ($x -ieq '%DESCARGAS_NAVEGADOR%') { $x = Get-CarpetaDescargasNavegador } else { $x = [Environment]::ExpandEnvironmentVariables($x) }
+    if ($x -and -not $r.Contains($x)) { $r.Add($x) } }
+  return ,$r }
 function Get-ZipHuella {
   # Huella de contenido de un ZIP: SHA-256 de la lista ordenada "ruta|tamano|CRC32" de sus archivos,
   # leida del directorio central (sin descomprimir). Ignora fechas internas, orden y nivel de compresion.
@@ -45,6 +70,14 @@ function Get-ZipHuella {
   } catch { return $null } finally { $fs.Dispose() }
 }
 $org = Join-Path $Raiz '_ORGANIZACION'; $man = Join-Path $org 'manifiesto_documental.csv'
+$entradaAct = (Get-ConfigPlataforma $org).CarpetaEntrada; $entradasAnt = @('nuevos')
+$hp = Join-Path $org 'entrada_historial.txt'; if (Test-Path -LiteralPath $hp) { $entradasAnt += @(Get-Content -LiteralPath $hp -Encoding UTF8 | ForEach-Object { "$_".Trim() } | Where-Object { $_ }) }
+$entradasAnt = @($entradasAnt | Where-Object { $_ -ine $entradaAct } | Select-Object -Unique)
+function Origen([string]$o) {   # v1.11
+  $s = Join-Path $Raiz $o; if (Test-Path -LiteralPath $s) { return $s }
+  foreach ($a in $entradasAnt) { if ($o.StartsWith($a + '\', [StringComparison]::OrdinalIgnoreCase)) {
+      $alt = Join-Path $Raiz ($entradaAct + $o.Substring($a.Length)); if (Test-Path -LiteralPath $alt) { return $alt } } }
+  return $s }
 $filas = @(Import-Csv -LiteralPath $Plan -Delimiter ';' -Encoding UTF8 | Sort-Object @{Expression={$_.Accion -notlike 'DUPLICADO*'}})
 $sello = Get-Date -Format 'yyyyMMdd_HHmmss'; $log = New-Object System.Collections.Generic.List[object]
 New-Item -ItemType Directory -Path $org -Force | Out-Null
@@ -64,7 +97,7 @@ foreach ($f in $filas) {
     $resto = Join-Path (Split-Path -Parent $Plan) ('{0}_resto_{1}.csv' -f [IO.Path]::GetFileNameWithoutExtension($Plan), (Get-Date -Format 'HHmmss'))
     $filas[$i..($filas.Count-1)] | Export-Csv -LiteralPath $resto -Delimiter ';' -NoTypeInformation -Encoding UTF8
     Reg $Plan $resto ('PLAN_APLAZADO: {0} filas pendientes' -f ($filas.Count - $i)); break }
-  $src = Join-Path $Raiz $f.Origen
+  $src = Origen $f.Origen
   if (-not (Test-Path -LiteralPath $src)) { Reg $src '' 'NO_ENCONTRADO'; continue }
   $destRel = $f.Destino; $nuevo = $f.NuevoNombre; $estado = 'MOVIDO'; $carpeta = ($f.Tipo -eq 'carpeta')
   if ($f.Accion -eq 'DUPLICADO_ZIP') {   # mismo contenido interno, distinto archivo ZIP: se verifica recalculando la huella de ambos
@@ -86,7 +119,7 @@ foreach ($f in $filas) {
           foreach ($fi in $items) {
             $filaMan = ([pscustomobject]@{ RutaRelativa=$fi.FullName.Substring($Raiz.Length).TrimStart('\','/'); SHA256=$(if($f.SHA256 -and -not $carpeta){$f.SHA256.ToLower()}else{ShaMan $fi.FullName});
               Tamano=$fi.Length; FechaMod=[int64]($fi.LastWriteTimeUtc-[datetime]'1970-01-01').TotalMilliseconds; Area=$f.Area; Estado=$estado;
-              NombreOriginal=$(if($carpeta){(Split-Path -Leaf $src)+'/'+$fi.Name}else{Split-Path -Leaf $src}); FechaClasificacion=(Get-Date -Format 'yyyy-MM-dd'); VersionSkill=$(if ($fi.Length -gt $MaxHashMB * 1MB -and -not $f.SHA256) { '1.10.1-sha-diferido' } else { '1.10.1' }) })
+              NombreOriginal=$(if($carpeta){(Split-Path -Leaf $src)+'/'+$fi.Name}else{Split-Path -Leaf $src}); FechaClasificacion=(Get-Date -Format 'yyyy-MM-dd'); VersionSkill=$(if ($fi.Length -gt $MaxHashMB * 1MB -and -not $f.SHA256) { '1.11-sha-diferido' } else { '1.11' }) })
             $nuevosMan.Add($filaMan); if (Test-Path -LiteralPath $man) { $filaMan | Export-Csv -LiteralPath $man -Delimiter ';' -NoTypeInformation -Encoding UTF8 -Append } else { $filaMan | Export-Csv -LiteralPath $man -Delimiter ';' -NoTypeInformation -Encoding UTF8 } } }
     catch { $estado = 'ERROR: ' + $_.Exception.Message }
   } else { $estado = 'SIMULADO_' + $estado }

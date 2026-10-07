@@ -1,0 +1,25 @@
+# Datos del usuario: nunca al repositorio
+manifiesto_documental.csv
+inventario_*.csv
+registro_*.csv
+vigilante_*.csv
+integridad_*.csv
+copia_*.csv
+huellas_zip.csv
+indice_entidades.csv
+m14_estado.csv
+borrados_solicitudes/
+planes_pendientes/
+planes_aplicados/
+modulos/
+_panel/
+*.lock
+*.pausa
+estado_plataforma.json
+panel_ultimo.json
+# temporales
+__pycache__/
+*.pyc
+tests/raiz*/
+tests/descargas*/
+tests/copia*/

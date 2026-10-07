@@ -1,8 +1,10 @@
-﻿<#  PANEL DE DUPLICADOS (organizador-documental v1.10.3).
+﻿<#  PANEL DE DUPLICADOS (organizador-documental v1.11).
     Genera _DUPLICADOS_REVISAR\PANEL_DUPLICADOS.html: un registro por grupo (documento clasificado que se conserva + todas sus
     copias en _DUPLICADOS_REVISAR), con miniaturas, ubicacion, estado de verificacion y marcado para borrar.
     El panel NO borra: crea SOLICITUD_BORRADO_DUPLICADOS_<fecha>.csv, que el vigilante verifica (SHA-256 o huella ZIP,
     original presente fuera de _DUPLICADOS_REVISAR) y ejecuta. Este script solo lee y escribe el propio panel.
+    v1.11: el panel indica en que carpetas recoge el vigilante las solicitudes (config_plataforma.csv; por defecto la
+           carpeta Descargas del navegador, la raiz documental y la carpeta de entrada).
     v1.10.3: textos del original contenidos en su columna (sin solaparse con las copias) y huella SHA-256
              abreviada como 12 primeras + 12 ultimas cifras en el original y en cada copia (a 1 cm del estado).
     v1.10.2: PANEL_DUPLICADOS.html es fijo (solo se reescribe si cambia la plantilla) y los datos van en
@@ -10,6 +12,29 @@
     Motivo: el 06-10-2026 el HTML quedo bloqueado (no se podia sobrescribir) y la pasada se colgo en la fase PANEL.   #>
 param([string]$Raiz = (Split-Path $PSScriptRoot -Parent), [int]$PresupuestoSeg = 240)
 $ErrorActionPreference = 'Stop'
+# --- v1.11: configuracion de la plataforma (config_plataforma.csv junto a los scripts) ---
+function Get-ConfigPlataforma([string]$dir) {
+  $c = [ordered]@{ RaizDocumental = ''; CarpetaEntrada = 'INPUT'; CarpetaSolicitudes = '%DESCARGAS_NAVEGADOR%' }
+  $p = Join-Path $dir 'config_plataforma.csv'
+  if (Test-Path -LiteralPath $p) {
+    try { foreach ($f in @(Import-Csv -LiteralPath $p -Delimiter ';' -Encoding UTF8)) {
+        $k = "$($f.Clave)".Trim(); if ($k -and $c.Contains($k)) { $c[$k] = "$($f.Valor)".Trim() } } } catch { } }
+  if (-not $c.CarpetaEntrada -or $c.CarpetaEntrada -match '[\\/:*?"<>|]' -or $c.CarpetaEntrada -match '^(\.|_|\d\d_)') { $c.CarpetaEntrada = 'INPUT' }
+  return $c }
+function Get-CarpetaDescargasNavegador {
+  # Carpeta "Descargas" de Windows (la que usan por defecto Edge, Chrome y Firefox); admite redireccion a otro disco.
+  $d = $null
+  try { $v = (Get-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders' -ErrorAction Stop).'{374DE290-123F-4565-9164-39C4925E467B}'
+        if ($v) { $d = [Environment]::ExpandEnvironmentVariables($v) } } catch { }
+  if (-not $d -and $env:USERPROFILE) { $d = Join-Path $env:USERPROFILE 'Downloads' }
+  if (-not $d -and $env:HOME) { $d = Join-Path $env:HOME 'Downloads' }
+  return $d }
+function Resolve-CarpetasSolicitudes([string]$valor) {
+  $r = New-Object System.Collections.Generic.List[string]
+  foreach ($x in ("$valor" -split '\|')) { $x = $x.Trim(); if (-not $x) { continue }
+    if ($x -ieq '%DESCARGAS_NAVEGADOR%') { $x = Get-CarpetaDescargasNavegador } else { $x = [Environment]::ExpandEnvironmentVariables($x) }
+    if ($x -and -not $r.Contains($x)) { $r.Add($x) } }
+  return ,$r }
 $org = Join-Path $Raiz '_ORGANIZACION'; $man = Join-Path $org 'manifiesto_documental.csv'
 $dupDir = Join-Path $Raiz '_DUPLICADOS_REVISAR'; $salida = Join-Path $dupDir 'PANEL_DUPLICADOS.html'; $pdir = Join-Path $dupDir '_panel'
 if (-not (Test-Path -LiteralPath $dupDir)) { New-Item -ItemType Directory -Path $dupDir | Out-Null }
@@ -66,7 +91,7 @@ foreach ($mes in @((Get-Date).AddMonths(-1), (Get-Date))) {
       $r = $l.Origen; if ($r.StartsWith($Raiz, [StringComparison]::OrdinalIgnoreCase)) { $r = Rel $r }
       $borr.Add([ordered]@{ f = $l.Fecha.Replace('T', ' '); r = $r; e = $l.Estado }) } } } }
 $borrados = @($borr | Select-Object -Last 300); [array]::Reverse($borrados)
-$datos = [ordered]@{ iso = (Get-Date -Format 's'); generado = (Get-Date -Format 'dd/MM/yyyy HH:mm'); incompleto = $cortado; grupos = @($grupos.Values); borrados = $borrados }
+$datos = [ordered]@{ iso = (Get-Date -Format 's'); generado = (Get-Date -Format 'dd/MM/yyyy HH:mm'); incompleto = $cortado; recogida = @(@(Resolve-CarpetasSolicitudes (Get-ConfigPlataforma $org).CarpetaSolicitudes) + @($Raiz)); grupos = @($grupos.Values); borrados = $borrados }
 $json = ($datos | ConvertTo-Json -Depth 6 -Compress) -replace '</', '<\/'
 $plantilla = @'
 <!doctype html>
@@ -243,7 +268,7 @@ details.historial td{padding:6px 8px;border-bottom:1px solid var(--linea);word-b
     <p id="confTexto"></p>
     <ol>
       <li>Al pulsar «Crear solicitud» se descarga el archivo <b id="confArchivo"></b>.</li>
-      <li>Si su navegador guarda las descargas en <b>DESCARGAS</b>, no tiene que hacer nada más. Si las guarda en otra carpeta, mueva ese archivo a la raíz de <b>G:\Mi unidad\DESCARGAS</b>.</li>
+      <li>El vigilante recoge la solicitud automáticamente de estas carpetas: <b id="confCarpetas">la carpeta Descargas del navegador y la raíz documental</b>. Si su navegador la guarda en otra carpeta, muévala a una de ellas o añada esa carpeta con <b>CONFIGURAR_PLATAFORMA.bat</b>.</li>
       <li>El vigilante lo recoge en su siguiente pasada (como mucho 10 minutos). Antes de borrar cada copia comprueba que el original sigue en su carpeta y que el contenido de ambos es idéntico. Si algo no cuadra, no borra esa copia.</li>
       <li>Las copias borradas van a la papelera de Google Drive, donde se pueden recuperar durante 30 días. El resultado queda en <b>_ORGANIZACION\borrados_solicitudes</b> y este panel se actualiza solo.</li>
     </ol>
@@ -311,6 +336,7 @@ details.historial td{padding:6px 8px;border-bottom:1px solid var(--linea);word-b
   document.getElementById('resumen').innerHTML = G.length
     ? '<span class="cifra">'+num(nCopias)+'</span> copias de <span class="cifra">'+num(G.length)+'</span> documentos ya clasificados. Borrarlas liberaría <span class="cifra">'+tam(bytes)+'</span>.'
     : (D.sinDatos ? 'No se encuentran los datos del panel.' : 'No hay duplicados pendientes de revisión.');
+  if (D.recogida && D.recogida.length) { document.getElementById('confCarpetas').textContent = D.recogida.join('  ·  '); }
   if (D.sinDatos) { document.getElementById('nota').textContent = 'Falta la carpeta _panel junto a este archivo o todavía no se ha generado. El vigilante la crea en su siguiente pasada.'; }
   else document.getElementById('nota').textContent = 'Generado el ' + D.generado + '. A la izquierda está el documento que se conserva, en su carpeta clasificada; a la derecha, sus copias en _DUPLICADOS_REVISAR. '
     + (nCopias - nProc ? (nCopias - nProc === 1 ? '1 copia no se puede borrar porque su original no está localizado o no coincide; revísela a mano.' : num(nCopias - nProc) + ' copias no se pueden borrar porque su original no está localizado o no coincide; revíselas a mano.') : 'Todas las copias tienen su original localizado.')

@@ -1,0 +1,4 @@
+﻿Clave;Valor;Descripcion
+RaizDocumental;G:\Mi unidad\DESCARGAS;Carpeta raiz que organiza el vigilante
+CarpetaEntrada;INPUT;Bandeja de entrada dentro de la raiz
+CarpetaSolicitudes;%DESCARGAS_NAVEGADOR%;Carpetas donde se recogen los CSV del panel (separadas por | - %DESCARGAS_NAVEGADOR% = Descargas de Windows)

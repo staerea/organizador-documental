@@ -1,7 +1,7 @@
 ﻿<#  VIGILANTE de la RAIZ (se ejecuta cada 10 min desde el Programador de tareas).
     1) Lo que aparece suelto en la raiz (archivos o carpetas), una vez estable:
        - duplicado exacto (SHA-256) o ZIP con mismo contenido -> _DUPLICADOS_REVISAR\<carpeta del original>\<original>__COPIA[_CONTENIDO]_n
-       - resto -> nuevos\  (cola para la clasificacion diaria de Claude)
+       - resto -> carpeta de entrada (INPUT por defecto; cola para la clasificacion de Claude)
     2) Aplica automaticamente los planes que Claude deja en _ORGANIZACION\planes_pendientes\ (Aplicar_Plan.ps1 -Ejecutar).
     3) (v1.6, M16) Antes de actuar comprueba la integridad (Verificar_Integridad.ps1 -Modo Alerta); si hay alerta
        o existe _ORGANIZACION\vigilante.pausa, no hace nada. Una vez al dia lanza la muestra de integridad en segundo plano.
@@ -12,12 +12,47 @@
        manifiesto, y una fase CONCILIAR repone las filas que falten de pasadas cortadas (segun el registro del mes).
     6) (v1.10) Panel de duplicados: atiende las solicitudes SOLICITUD_BORRADO_DUPLICADOS_*.csv que crea
        _DUPLICADOS_REVISAR\PANEL_DUPLICADOS.html y regenera ese panel cuando hay cambios (o cada hora).
+    7) (v1.11) Rutas configurables en _ORGANIZACION\config_plataforma.csv (CONFIGURAR_PLATAFORMA.bat): raiz documental
+       (por defecto G:\Mi unidad\DESCARGAS), carpeta de entrada (por defecto INPUT; antes "nuevos") y carpetas donde se
+       recogen las solicitudes de la interfaz (por defecto la carpeta Descargas del navegador, ademas de la raiz y la entrada).
+       Si cambia el nombre de la entrada, la carpeta anterior se traslada sola (registro ENTRADA_MIGRADA) y los planes que aun
+       citen el nombre antiguo se siguen aplicando. Una solicitud ya procesada que reaparece se archiva sin repetirla.
+       Una vez al dia lanza la copia verificada (M15) si esta activa y su destino esta disponible.
     UNICA excepcion a "nunca borra": a peticion expresa del usuario (solicitud del panel) borra copias que esten DENTRO de
     _DUPLICADOS_REVISAR, solo si su original sigue fuera de esa carpeta y el contenido es identico (SHA-256, o huella ZIP);
     en Google Drive el borrado va a la papelera (30 dias). Cada decision queda en el registro, el resultado y el manifiesto.
     Fuera de ese caso, NUNCA borra nada. Todo queda en _ORGANIZACION\vigilante_<AAAAMM>.csv y en el manifiesto.   #>
-param([string]$Raiz = (Split-Path $PSScriptRoot -Parent), [string]$Entrada = 'nuevos', [int]$EsperaSeg = 120, [int]$HuerfanoMin = 35, [int]$PresupuestoM16Seg = 120, [int]$PresupuestoRaizMin = 15, [int]$PresupuestoConciliarSeg = 180, [int]$PresupuestoBorradoMin = 6, [int]$PanelMaxSeg = 300)
+param([string]$Raiz = '', [string]$Entrada = '', [int]$EsperaSeg = 120, [int]$HuerfanoMin = 35, [int]$PresupuestoM16Seg = 120, [int]$PresupuestoRaizMin = 15, [int]$PresupuestoConciliarSeg = 180, [int]$PresupuestoBorradoMin = 6, [int]$PanelMaxSeg = 300)
 $ErrorActionPreference = 'Stop'
+# --- v1.11: configuracion de la plataforma (config_plataforma.csv junto a los scripts) ---
+function Get-ConfigPlataforma([string]$dir) {
+  $c = [ordered]@{ RaizDocumental = ''; CarpetaEntrada = 'INPUT'; CarpetaSolicitudes = '%DESCARGAS_NAVEGADOR%' }
+  $p = Join-Path $dir 'config_plataforma.csv'
+  if (Test-Path -LiteralPath $p) {
+    try { foreach ($f in @(Import-Csv -LiteralPath $p -Delimiter ';' -Encoding UTF8)) {
+        $k = "$($f.Clave)".Trim(); if ($k -and $c.Contains($k)) { $c[$k] = "$($f.Valor)".Trim() } } } catch { } }
+  if (-not $c.CarpetaEntrada -or $c.CarpetaEntrada -match '[\\/:*?"<>|]' -or $c.CarpetaEntrada -match '^(\.|_|\d\d_)') { $c.CarpetaEntrada = 'INPUT' }
+  return $c }
+function Get-CarpetaDescargasNavegador {
+  # Carpeta "Descargas" de Windows (la que usan por defecto Edge, Chrome y Firefox); admite redireccion a otro disco.
+  $d = $null
+  try { $v = (Get-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders' -ErrorAction Stop).'{374DE290-123F-4565-9164-39C4925E467B}'
+        if ($v) { $d = [Environment]::ExpandEnvironmentVariables($v) } } catch { }
+  if (-not $d -and $env:USERPROFILE) { $d = Join-Path $env:USERPROFILE 'Downloads' }
+  if (-not $d -and $env:HOME) { $d = Join-Path $env:HOME 'Downloads' }
+  return $d }
+function Resolve-CarpetasSolicitudes([string]$valor) {
+  $r = New-Object System.Collections.Generic.List[string]
+  foreach ($x in ("$valor" -split '\|')) { $x = $x.Trim(); if (-not $x) { continue }
+    if ($x -ieq '%DESCARGAS_NAVEGADOR%') { $x = Get-CarpetaDescargasNavegador } else { $x = [Environment]::ExpandEnvironmentVariables($x) }
+    if ($x -and -not $r.Contains($x)) { $r.Add($x) } }
+  return ,$r }
+$cfgP = Get-ConfigPlataforma $PSScriptRoot
+if (-not $Raiz) { $Raiz = if ($cfgP.RaizDocumental) { $cfgP.RaizDocumental } else { Split-Path $PSScriptRoot -Parent } }
+$Raiz = $Raiz.TrimEnd('\','/'); if (-not $Entrada) { $Entrada = $cfgP.CarpetaEntrada }
+if (-not (Test-Path -LiteralPath (Join-Path $Raiz '_ORGANIZACION') -PathType Container)) {   # v1.11: raiz no disponible (Drive sin montar, ruta mal configurada)
+  try { Add-Content -LiteralPath (Join-Path $PSScriptRoot 'vigilante_sin_raiz.txt') -Value ("{0};raiz no disponible;{1}" -f (Get-Date -Format s), $Raiz) -Encoding UTF8 } catch { }
+  return }
 function Get-ZipHuella {
   # Huella de contenido de un ZIP: SHA-256 de la lista ordenada "ruta|tamano|CRC32" de sus archivos,
   # leida del directorio central (sin descomprimir). Ignora fechas internas, orden y nivel de compresion.
@@ -99,6 +134,20 @@ function Estable($item) {
   if ($item.LastWriteTime -gt $lim) { return $false }
   try { $s = [IO.File]::Open($item.FullName,'Open','Read','None'); $s.Dispose(); return $true } catch { return $false } }
 try {
+  # --- v1.11: migracion de la carpeta de entrada (nuevos -> INPUT, o cualquier cambio posterior de nombre) ---
+  Fase 'ENTRADA'
+  $entradaDir = Join-Path $Raiz $Entrada; $histP = Join-Path $org 'entrada_historial.txt'
+  $hist = @('nuevos'); if (Test-Path -LiteralPath $histP) { $hist += @(Get-Content -LiteralPath $histP -Encoding UTF8 | ForEach-Object { "$_".Trim() } | Where-Object { $_ -and $_ -notmatch '^#' }) }
+  $anteriores = @($hist | Where-Object { $_ -ine $Entrada } | Select-Object -Unique)
+  foreach ($a in $anteriores) {
+    $ad = Join-Path $Raiz $a; if (-not (Test-Path -LiteralPath $ad -PathType Container)) { continue }
+    if (-not (Test-Path -LiteralPath $entradaDir)) { Move-Item -LiteralPath $ad -Destination $entradaDir; Log $ad $entradaDir 'ENTRADA_RENOMBRADA'; Latido 'ENTRADA_MIGRADA' ("{0} -> {1} (renombrada)" -f $a, $Entrada) }
+    else { $nTr = 0
+      foreach ($c in @(Get-ChildItem -LiteralPath $ad -Force)) { $dst = Libre $entradaDir $c.Name $c.PSIsContainer; Move-Item -LiteralPath $c.FullName -Destination $dst; Log $c.FullName $dst 'ENTRADA_TRASLADADA'; $nTr++ }
+      if (@(Get-ChildItem -LiteralPath $ad -Force).Count -eq 0) { Remove-Item -LiteralPath $ad }   # carpeta ya vacia: no es un documento
+      Latido 'ENTRADA_MIGRADA' ("{0} -> {1} ({2} elementos trasladados)" -f $a, $Entrada, $nTr) } }
+  if (-not (@($hist) -icontains $Entrada)) { Add-Content -LiteralPath $histP -Value $Entrada -Encoding UTF8 }
+  if (-not (Test-Path -LiteralPath $entradaDir)) { New-Item -ItemType Directory -Path $entradaDir | Out-Null }
   # --- M16: integridad y alerta temprana (si esta activo en config_modulos.csv) ---
   $integ = Join-Path $org 'Verificar_Integridad.ps1'
   if (Test-Path -LiteralPath $integ) {
@@ -112,6 +161,16 @@ try {
       try { Start-Process -FilePath 'powershell.exe' -WindowStyle Hidden -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File',('"{0}"' -f $integ),'-Raiz',('"{0}"' -f $Raiz),'-Modo','Muestra') | Out-Null }
       catch { Log '' '' ('M16_MUESTRA_NO_LANZADA: ' + $_.Exception.Message) } }
   }
+  # --- v1.11, M15: copia verificada (una vez al dia, en segundo plano, si esta activa) ---
+  $copiaPs = Join-Path $org 'Copia_Verificada.ps1'; $cfgM = Join-Path $org 'config_modulos.csv'
+  if ((Test-Path -LiteralPath $copiaPs) -and (Test-Path -LiteralPath $cfgM)) {
+    $m15 = @(Import-Csv -LiteralPath $cfgM -Delimiter ';' -Encoding UTF8 | Where-Object { $_.Modulo -eq 'M15' -and $_.Activo -eq 'SI' }).Count -gt 0
+    $marcaCopia = Join-Path $org 'copia_ultima.txt'; $hoyC = Get-Date -Format 'yyyy-MM-dd'
+    $hechaC = (Test-Path -LiteralPath $marcaCopia) -and ((Get-Content -LiteralPath $marcaCopia -Raw) -match [regex]::Escape($hoyC))
+    if ($m15 -and -not $hechaC -and -not (Test-Path -LiteralPath (Join-Path $org 'copia.lock'))) {
+      try { $exeC = (Get-Process -Id $PID).Path; $spc = @{ FilePath = $exeC; ArgumentList = @('-NoProfile','-ExecutionPolicy','Bypass','-File',('"{0}"' -f $copiaPs),'-Raiz',('"{0}"' -f $Raiz)) }
+            if ($env:OS -eq 'Windows_NT') { $spc.WindowStyle = 'Hidden' }; Start-Process @spc | Out-Null; Latido 'M15_COPIA_LANZADA' '' }
+      catch { Log '' '' ('M15_NO_LANZADA: ' + $_.Exception.Message) } } }
   # --- indices del manifiesto ---
   Fase 'MANIFIESTO'
   $porSha = @{}; $enMan = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
@@ -124,7 +183,6 @@ try {
   $exclDirRx = '^(\d\d_.*|_.*|99_.*)$'   # carpetas de area y de control (solo carpetas: un ARCHIVO que empiece por _ o NN_ si se procesa)
   $exclRx = '^(desktop\.ini|thumbs\.db|~\$.*|.*\.(crdownload|part|partial|download|tmp|opdownload)|(INVENTARIAR|SEMBRAR_MANIFIESTO|INSTALAR_VIGILANTE|DESINSTALAR_VIGILANTE|REANUDAR_VIGILANTE|APLICAR.*)\.bat|ALERTA_INTEGRIDAD\.txt|SOLICITUD_BORRADO_DUPLICADOS_.*\.csv)$'
   $exclTxt = Join-Path $org 'excluir_raiz.txt'; $exclExtra = @(); if (Test-Path -LiteralPath $exclTxt) { $exclExtra = @(Get-Content -LiteralPath $exclTxt | Where-Object { $_ -and $_ -notmatch '^#' }) }
-  $entradaDir = Join-Path $Raiz $Entrada; if (-not (Test-Path -LiteralPath $entradaDir)) { New-Item -ItemType Directory -Path $entradaDir | Out-Null }
   # --- v1.9.2: conciliacion del manifiesto con el registro del mes (duplicados apartados por pasadas cortadas) ---
   Fase 'CONCILIAR'; $nConc = 0
   if (Test-Path -LiteralPath $logPath) {
@@ -143,9 +201,14 @@ try {
   # --- v1.10: solicitudes de borrado del panel de duplicados ---
   Fase 'BORRADOS'; $nBorr = 0; $nRech = 0
   $solDir = Join-Path $org 'borrados_solicitudes'; $solHechas = Join-Path $solDir 'procesadas'; $rxSol = '^SOLICITUD_BORRADO_DUPLICADOS_.*\.csv$'
-  foreach ($s in @(@($Raiz, $entradaDir) | ForEach-Object { Get-ChildItem -LiteralPath $_ -File -Force -ErrorAction SilentlyContinue } | Where-Object { $_.Name -match $rxSol })) {
+  $carpetasSol = @(@($Raiz, $entradaDir) + @(Resolve-CarpetasSolicitudes $cfgP.CarpetaSolicitudes) | Where-Object { $_ -and (Test-Path -LiteralPath $_ -PathType Container) } | Select-Object -Unique)
+  foreach ($s in @($carpetasSol | ForEach-Object { Get-ChildItem -LiteralPath $_ -File -Force -ErrorAction SilentlyContinue } | Where-Object { $_.Name -match $rxSol })) {
     if (-not (Estable $s)) { continue }
     foreach ($d in $solDir, $solHechas) { if (-not (Test-Path -LiteralPath $d)) { New-Item -ItemType Directory -Path $d | Out-Null } }
+    $previa = @((Join-Path $solHechas $s.Name), (Join-Path $solDir $s.Name) | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Select-Object -First 1)
+    if ($previa.Count -and (Get-Item -LiteralPath $previa[0]).Length -eq $s.Length) {   # v1.11: ya recibida antes (p. ej. copia que sigue en Descargas)
+      $rep = Join-Path $solHechas 'repetidas'; if (-not (Test-Path -LiteralPath $rep)) { New-Item -ItemType Directory -Path $rep | Out-Null }
+      $dst = Libre $rep $s.Name $false; Move-Item -LiteralPath $s.FullName -Destination $dst; Log $s.FullName $dst 'SOLICITUD_REPETIDA_ARCHIVADA'; continue }
     $dst = Libre $solDir $s.Name $false; Move-Item -LiteralPath $s.FullName -Destination $dst; Log $s.FullName $dst 'SOLICITUD_BORRADO_RECIBIDA' }
   if (Test-Path -LiteralPath $solDir) {
     $rb = [Diagnostics.Stopwatch]::StartNew(); $sha256 = [Security.Cryptography.SHA256]::Create()
@@ -175,7 +238,7 @@ try {
               $shaD = (Get-FileHash -LiteralPath $pd -Algorithm SHA256).Hash.ToLower(); $tamD = $fd.Length; $fmD = [int64]($fd.LastWriteTimeUtc-[datetime]'1970-01-01').TotalMilliseconds
               Remove-Item -LiteralPath $pd   # en Google Drive para escritorio va a la papelera de Drive (30 dias)
               ManAdd ([pscustomobject]@{ RutaRelativa=$d; SHA256=$shaD; Tamano=$tamD; FechaMod=$fmD; Area='_DUPLICADOS_REVISAR'; Estado='BORRADO_POR_USUARIO';
-                NombreOriginal=$o; FechaClasificacion=(Get-Date -Format 'yyyy-MM-dd'); VersionSkill='1.10' })
+                NombreOriginal=$o; FechaClasificacion=(Get-Date -Format 'yyyy-MM-dd'); VersionSkill='1.11' })
               $est = 'BORRADO_VERIFICADO'; $mot = 'identico a ' + $o }
           } catch { $est = 'NO_BORRADO_ERROR'; $mot = $_.Exception.Message } }
         if ($est -eq 'BORRADO_VERIFICADO') { $nBorr++ } else { $nRech++ }
@@ -193,7 +256,7 @@ try {
   Fase 'RAIZ'
   $nMov = 0; $nPend = 0; $nDupRaiz = 0
   foreach ($it in @(Get-ChildItem -LiteralPath $Raiz -Force)) {
-    if ($it.Name -eq $Entrada -or ($it.PSIsContainer -and $it.Name -imatch $exclDirRx) -or (-not $it.PSIsContainer -and $it.Name -imatch $exclRx) -or $exclExtra -contains $it.Name) { continue }
+    if ($it.Name -eq $Entrada -or ($it.PSIsContainer -and @($anteriores) -icontains $it.Name) -or ($it.PSIsContainer -and $it.Name -imatch $exclDirRx) -or (-not $it.PSIsContainer -and $it.Name -imatch $exclRx) -or $exclExtra -contains $it.Name) { continue }
     if (((Get-Date) - $t0).TotalMinutes -ge $PresupuestoRaizMin) { $nPend++; continue }   # v1.9.2: se cuentan y quedan para la proxima pasada
     if (-not (Estable $it)) { continue }
     $src = $it.FullName; $destino = $null; $estado = 'EN_COLA'
@@ -246,6 +309,8 @@ try {
           if ($rp -and $rp.Ranura) { Latido 'PANEL_ACTUALIZADO' ("grupos={0} copias={1} incompleto={2} ranura={3} html={4}" -f $rp.Grupos, $rp.Copias, $rp.Incompleto, $rp.Ranura, $rp.Html) }
           else { Log '' '' ('PANEL_ERROR: el generador termino sin escribir datos' + $(if ($rp) { ' (' + $rp.Fallos + ')' } else { '' })) } } }
       catch { Log '' '' ('PANEL_ERROR: ' + $_.Exception.Message) } } }
+  try { [ordered]@{ version = '1.11'; ultimaPasada = (Get-Date -Format s); raiz = $Raiz; entrada = $Entrada; carpetasSolicitudes = @($carpetasSol); movidos = $nMov; planes = $nPlan; borrados = $nBorr } |
+        ConvertTo-Json | Set-Content -LiteralPath (Join-Path $org 'estado_plataforma.json') -Encoding UTF8 } catch { }
   Fase 'FIN'; Latido 'FIN_OK' ("movidos={0} planes={1} raiz_pendientes={2} conciliados={3} borrados={4}" -f $nMov, $nPlan, $nPend, $nConc, $nBorr)
 } catch { Log '' '' ('ERROR: ' + $_.Exception.Message); Latido 'FIN_ERROR' $_.Exception.Message }
 finally { Remove-Item -LiteralPath $lock -ErrorAction SilentlyContinue }

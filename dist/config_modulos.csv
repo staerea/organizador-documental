@@ -1,0 +1,20 @@
+﻿Modulo;Nombre;Activo;Modo;Parametros
+M1;Control de caducidades con avisos;BAJO_DEMANDA;;
+M2;Detector de version vigente;BAJO_DEMANDA;;
+M3;Paquetes documentales;BAJO_DEMANDA;;
+M4;Cadena de custodia periciales;BAJO_DEMANDA;;
+M5;Libro de gastos;BAJO_DEMANDA;;
+M6;Cumplimiento RGPD;BAJO_DEMANDA;;
+M7;Busqueda en lenguaje natural;BAJO_DEMANDA;;
+M8;Bandeja vigilada;SI;AUTOMATICO;
+M9;Panel del archivo;BAJO_DEMANDA;;
+M10;Expedientes virtuales;BAJO_DEMANDA;;
+M11;Fichas resumen;BAJO_DEMANDA;;
+M12;Casi duplicados;BAJO_DEMANDA;;
+M13;Retencion y ciclo de vida;BAJO_DEMANDA;;
+M14;Indice de metadatos y entidades;SI;INCREMENTAL;Lote=60|MaxMB=300|Ocr=NO
+M15;Copia de seguridad verificable;NO;AUTOMATICO;Destino=|Areas=01_STAEREA_PROYECTOS,02_STAEREA_ADMIN,08_ASESORIA_LABORAL_FISCAL,09_PERSONAL_SENSIBLE|Frecuencia=DIARIA|MaxGBPorPasada=50
+M16;Integridad y alerta ransomware;SI;AUTOMATICO;MuestraDiaria=1/7|UmbralCambios10min=200
+M17;Entrada desde el correo;NO;AUTOMATICO;Etiquetas=|Remitentes=|Desde=
+M18;Preservacion a largo plazo;SI;INFORME;
+M19;Mapa de relaciones;SI;INFORME;
