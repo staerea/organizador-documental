@@ -1,0 +1,489 @@
+﻿<#  PANEL DE DUPLICADOS (organizador-documental v1.10.3).
+    Genera _DUPLICADOS_REVISAR\PANEL_DUPLICADOS.html: un registro por grupo (documento clasificado que se conserva + todas sus
+    copias en _DUPLICADOS_REVISAR), con miniaturas, ubicacion, estado de verificacion y marcado para borrar.
+    El panel NO borra: crea SOLICITUD_BORRADO_DUPLICADOS_<fecha>.csv, que el vigilante verifica (SHA-256 o huella ZIP,
+    original presente fuera de _DUPLICADOS_REVISAR) y ejecuta. Este script solo lee y escribe el propio panel.
+    v1.10.3: textos del original contenidos en su columna (sin solaparse con las copias) y huella SHA-256
+             abreviada como 12 primeras + 12 ultimas cifras en el original y en cada copia (a 1 cm del estado).
+    v1.10.2: PANEL_DUPLICADOS.html es fijo (solo se reescribe si cambia la plantilla) y los datos van en
+    _DUPLICADOS_REVISAR\_panel\datos_1..3.js, rotatorios: se escribe el mas antiguo y, si esta bloqueado, el siguiente.
+    Motivo: el 06-10-2026 el HTML quedo bloqueado (no se podia sobrescribir) y la pasada se colgo en la fase PANEL.   #>
+param([string]$Raiz = (Split-Path $PSScriptRoot -Parent), [int]$PresupuestoSeg = 240)
+$ErrorActionPreference = 'Stop'
+$org = Join-Path $Raiz '_ORGANIZACION'; $man = Join-Path $org 'manifiesto_documental.csv'
+$dupDir = Join-Path $Raiz '_DUPLICADOS_REVISAR'; $salida = Join-Path $dupDir 'PANEL_DUPLICADOS.html'; $pdir = Join-Path $dupDir '_panel'
+if (-not (Test-Path -LiteralPath $dupDir)) { New-Item -ItemType Directory -Path $dupDir | Out-Null }
+$reloj = [Diagnostics.Stopwatch]::StartNew()
+function Rel([string]$p) { $p.Substring($Raiz.Length).TrimStart('\','/') -replace '/', '\' }
+function Abs([string]$r) { Join-Path $Raiz ($r -replace '\\', [IO.Path]::DirectorySeparatorChar) }
+# --- manifiesto: ultima fila por ruta; rutas clasificadas por SHA ---
+$porRel = @{}; $porSha = @{}
+if (Test-Path -LiteralPath $man) {
+  foreach ($m in (Import-Csv -LiteralPath $man -Delimiter ';' -Encoding UTF8)) {
+    if (-not $m.RutaRelativa) { continue }
+    $m.RutaRelativa = $m.RutaRelativa.Replace('/', '\')
+    $k = $m.RutaRelativa.ToLowerInvariant(); $porRel[$k] = $m
+    if ($m.SHA256 -and $m.Estado -notlike 'BORRADO*' -and $m.RutaRelativa -notlike '_DUPLICADOS_REVISAR*') {
+      $s = $m.SHA256.ToLowerInvariant(); if (-not $porSha.ContainsKey($s)) { $porSha[$s] = New-Object System.Collections.Generic.List[string] }
+      if (-not $porSha[$s].Contains($m.RutaRelativa)) { $porSha[$s].Add($m.RutaRelativa) } } } }
+function ShaMan([string]$r) { $m = $porRel[$r.ToLowerInvariant()]; if ($m -and $m.SHA256 -and $m.Estado -notlike 'BORRADO*') { return $m.SHA256.ToLowerInvariant() }; return '' }
+$rx = '^(?<b>.*)__COPIA(?<z>_CONTENIDO)?_\d+(?<e>\.[^.\\]*)?$'
+$grupos = [ordered]@{}; $cortado = $false
+foreach ($ruta in [IO.Directory]::EnumerateFiles($dupDir, '*', [IO.SearchOption]::AllDirectories)) {
+  if ($reloj.Elapsed.TotalSeconds -gt $PresupuestoSeg) { $cortado = $true; break }
+  $fi = New-Object IO.FileInfo $ruta
+  if ($fi.Name -like 'PANEL_DUPLICADOS*' -or $fi.Name -ieq 'desktop.ini' -or $fi.FullName.StartsWith($pdir, [StringComparison]::OrdinalIgnoreCase)) { continue }
+  $rel = Rel $fi.FullName; $sinPref = $rel.Substring('_DUPLICADOS_REVISAR\'.Length)
+  $mDup = $porRel[$rel.ToLowerInvariant()]; $shaDup = ShaMan $rel
+  $esZip = $false; $orig = $null
+  $mm = [regex]::Match($sinPref, $rx)
+  if ($mm.Success) { $orig = $mm.Groups['b'].Value + $mm.Groups['e'].Value; $esZip = $mm.Groups['z'].Success }
+  if ($mDup -and $mDup.Estado -like '*ZIP*') { $esZip = $true }
+  $origOk = $orig -and (Test-Path -LiteralPath (Abs $orig) -PathType Leaf)
+  if (-not $origOk -and $shaDup -and $porSha.ContainsKey($shaDup)) {
+    foreach ($c in $porSha[$shaDup]) { if (Test-Path -LiteralPath (Abs $c) -PathType Leaf) { $orig = $c; $origOk = $true; break } } }
+  if (-not $orig) { $orig = $sinPref }
+  $v = 'NO'; $motivo = ''; $oTam = $null; $shaOrig = ''
+  if ($origOk) {
+    $oTam = (Get-Item -LiteralPath (Abs $orig)).Length; $shaOrig = ShaMan $orig
+    if ($esZip) { $v = 'ZIP' }
+    elseif ($shaDup -and $shaOrig -and $shaDup -eq $shaOrig -and $oTam -eq $fi.Length) { $v = 'SHA' }
+    elseif ($oTam -eq $fi.Length) { $v = 'TAM' }
+    else { $motivo = 'El tamaño no coincide con el original' } }
+  else { $motivo = 'Original no localizado: conserve esta copia' }
+  $k = $orig.ToLowerInvariant()
+  if (-not $grupos.Contains($k)) {
+    $otros = @(); if ($shaOrig -and $porSha.ContainsKey($shaOrig)) { $otros = @($porSha[$shaOrig] | Where-Object { $_ -ne $orig } | Select-Object -First 5) }
+    $grupos[$k] = [ordered]@{ o = $orig; os = $oTam; oe = [bool]$origOk; sha = $shaOrig; otros = @($otros); c = New-Object System.Collections.Generic.List[object] } }
+  $grupos[$k].c.Add([ordered]@{ r = $rel; s = $fi.Length; f = $(if ($mDup -and $mDup.FechaClasificacion) { $mDup.FechaClasificacion } else { $fi.CreationTime.ToString('yyyy-MM-dd') }); v = $v; m = $motivo; h = $shaDup })
+}
+# --- historial de borrados (registro del vigilante, mes actual y anterior) ---
+$borr = New-Object System.Collections.Generic.List[object]
+foreach ($mes in @((Get-Date).AddMonths(-1), (Get-Date))) {
+  $lp = Join-Path $org ("vigilante_{0}.csv" -f $mes.ToString('yyyyMM'))
+  if (Test-Path -LiteralPath $lp) { foreach ($l in (Import-Csv -LiteralPath $lp -Delimiter ';' -Encoding UTF8)) {
+    if ($l.Estado -like 'BORRADO*' -or $l.Estado -like 'NO_BORRADO*') {
+      $r = $l.Origen; if ($r.StartsWith($Raiz, [StringComparison]::OrdinalIgnoreCase)) { $r = Rel $r }
+      $borr.Add([ordered]@{ f = $l.Fecha.Replace('T', ' '); r = $r; e = $l.Estado }) } } } }
+$borrados = @($borr | Select-Object -Last 300); [array]::Reverse($borrados)
+$datos = [ordered]@{ iso = (Get-Date -Format 's'); generado = (Get-Date -Format 'dd/MM/yyyy HH:mm'); incompleto = $cortado; grupos = @($grupos.Values); borrados = $borrados }
+$json = ($datos | ConvertTo-Json -Depth 6 -Compress) -replace '</', '<\/'
+$plantilla = @'
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Duplicados en revisión</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Public+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap" rel="stylesheet">
+<style>
+:root{
+  --papel:#F2F5F3; --hoja:#FFFFFF; --tinta:#1D2B2A; --tenue:#5E6F6C; --linea:#D5DEDA;
+  --original:#2F6B5E; --original-suave:#E3EFEB; --copia:#8A9A97;
+  --verifica:#2F5FA6; --borrar:#A23B54; --borrar-suave:#F7E6EA; --aviso:#8A5A00; --aviso-suave:#FBF0D9;
+  --sombra:0 1px 0 rgba(29,43,42,.06);
+  color-scheme:light;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --papel:#141C1B; --hoja:#1B2524; --tinta:#E4ECEA; --tenue:#9AABA7; --linea:#2E3C3A;
+    --original:#6DB8A5; --original-suave:#1F3531; --copia:#7F918D;
+    --verifica:#7FA8E6; --borrar:#E28AA0; --borrar-suave:#3A1F27; --aviso:#E7B65A; --aviso-suave:#3A2E14;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --papel:#141C1B; --hoja:#1B2524; --tinta:#E4ECEA; --tenue:#9AABA7; --linea:#2E3C3A;
+  --original:#6DB8A5; --original-suave:#1F3531; --copia:#7F918D;
+  --verifica:#7FA8E6; --borrar:#E28AA0; --borrar-suave:#3A1F27; --aviso:#E7B65A; --aviso-suave:#3A2E14;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--papel);color:var(--tinta);font:15px/1.5 "Public Sans",system-ui,-apple-system,"Segoe UI",sans-serif;-webkit-font-smoothing:antialiased}
+a{color:inherit}
+button,input,select{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--verifica);outline-offset:2px;border-radius:4px}
+.envoltura{max-width:1240px;margin:0 auto;padding:32px 24px 140px}
+header.cabecera{display:grid;gap:10px;margin-bottom:28px}
+.titulo{font-size:15px;font-weight:600;color:var(--tenue);margin:0}
+.resumen{font-size:clamp(26px,3.4vw,40px);line-height:1.15;font-weight:600;letter-spacing:-.015em;margin:0;max-width:30ch}
+.resumen .cifra{font-variant-numeric:tabular-nums;color:var(--original)}
+.nota{color:var(--tenue);max-width:78ch;margin:0}
+.herramientas{position:sticky;top:0;z-index:5;background:var(--papel);display:flex;flex-wrap:wrap;gap:10px;align-items:center;padding:12px 0;border-bottom:1px solid var(--linea);margin-bottom:18px}
+.herramientas input[type=search]{flex:1 1 260px;min-width:0;padding:9px 12px;border:1px solid var(--linea);border-radius:8px;background:var(--hoja)}
+.herramientas select{flex:1 1 170px;padding:9px 10px;border:1px solid var(--linea);border-radius:8px;background:var(--hoja);max-width:100%}
+.contador{color:var(--tenue);font-size:13px;margin-left:auto;font-variant-numeric:tabular-nums}
+.grupo{display:grid;grid-template-columns:minmax(260px,5fr) 34px minmax(280px,7fr);background:var(--hoja);border:1px solid var(--linea);border-radius:12px;margin-bottom:12px;box-shadow:var(--sombra);overflow:hidden}
+.grupo>*{min-width:0}
+.lado-original>div,.copia>div{min-width:0}
+.grupo.no-procede{border-color:color-mix(in srgb,var(--aviso) 45%,var(--linea))}
+.lado-original{padding:16px;overflow:hidden;display:grid;grid-template-columns:76px 1fr;gap:14px;align-content:start;background:linear-gradient(90deg,var(--original-suave),transparent 85%)}
+.miniatura{width:76px;height:96px;border-radius:6px;background:var(--papel);border:1px solid var(--linea);display:grid;place-items:center;overflow:hidden;position:relative;cursor:pointer;padding:0}
+.miniatura img,.miniatura video{width:100%;height:100%;object-fit:cover;display:block}
+.miniatura .ext{font-weight:700;font-size:13px;color:var(--tenue);letter-spacing:.02em}
+.miniatura.peq{width:44px;height:56px;border-radius:5px}
+.miniatura.peq .ext{font-size:10px}
+.nombre{font-weight:600;overflow-wrap:anywhere;margin:0 0 4px}
+.ruta{font-size:13px;color:var(--tenue);overflow-wrap:anywhere;margin:0}
+.cab-copias{font-size:13px;color:var(--tenue);margin:4px 8px 2px;overflow-wrap:anywhere}
+.ruta b{font-weight:600;color:var(--original)}
+.datos{font-size:13px;color:var(--tenue);margin:6px 0 0;font-variant-numeric:tabular-nums}
+.hash{font-family:ui-monospace,"Cascadia Mono",Consolas,monospace;font-size:12px;white-space:nowrap}
+.fin-copia{display:flex;align-items:center;gap:1cm;justify-self:end}
+.fin-copia .hash{color:var(--tenue)}
+.acciones{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+.boton{display:inline-flex;align-items:center;gap:6px;padding:6px 11px;border-radius:7px;border:1px solid var(--linea);background:var(--hoja);font-size:13px;font-weight:500;cursor:pointer;text-decoration:none}
+.boton:hover{border-color:var(--tenue)}
+.boton.peligro{color:var(--borrar);border-color:color-mix(in srgb,var(--borrar) 40%,var(--linea))}
+.boton.peligro:hover{background:var(--borrar-suave)}
+.boton.principal{background:var(--borrar);border-color:var(--borrar);color:#fff}
+.boton[disabled]{opacity:.45;cursor:not-allowed}
+.enlace{position:relative;display:grid;place-items:center}
+.enlace::before{content:"";position:absolute;inset:0 50%;border-left:2px dashed var(--linea)}
+.enlace span{position:relative;width:26px;height:26px;border-radius:50%;display:grid;place-items:center;font-size:15px;font-weight:700;background:var(--hoja);border:2px solid var(--original);color:var(--original)}
+.no-procede .enlace span{border-color:var(--aviso);color:var(--aviso)}
+.lado-copias{padding:12px 16px;overflow:hidden;display:grid;gap:6px;align-content:start}
+.copia{display:grid;grid-template-columns:24px 44px minmax(0,1fr) auto;gap:12px;align-items:center;padding:6px 8px;border-radius:8px}
+.copia:hover{background:var(--papel)}
+.copia.marcada{background:var(--borrar-suave)}
+.copia.marcada .nombre{text-decoration:line-through;text-decoration-color:var(--borrar)}
+.copia input{width:18px;height:18px;accent-color:var(--borrar);margin:0}
+.copia .nombre{font-weight:500;font-size:14px;margin:0}
+.estado{font-size:12px;font-weight:600;padding:3px 8px;border-radius:999px;white-space:nowrap}
+.estado.ok{background:var(--original-suave);color:var(--original)}
+.estado.ver{background:color-mix(in srgb,var(--verifica) 14%,transparent);color:var(--verifica)}
+.estado.no{background:var(--aviso-suave);color:var(--aviso)}
+.estado.sol{background:var(--borrar-suave);color:var(--borrar)}
+.pie-grupo{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:4px 8px 2px;font-size:13px;color:var(--tenue)}
+.otros{font-size:13px;color:var(--tenue);margin:8px 0 0;overflow-wrap:anywhere}
+.paginacion{display:flex;gap:8px;justify-content:center;align-items:center;margin:22px 0;color:var(--tenue);font-size:14px}
+.vacio{padding:48px 16px;text-align:center;color:var(--tenue);border:1px dashed var(--linea);border-radius:12px}
+.barra{position:fixed;left:0;right:0;bottom:0;z-index:10;background:var(--hoja);border-top:1px solid var(--linea);transform:translateY(110%);transition:transform .2s ease}
+.barra.visible{transform:none}
+.barra .dentro{max-width:1240px;margin:0 auto;padding:14px 24px;display:flex;flex-wrap:wrap;gap:12px;align-items:center}
+.barra .texto{flex:1 1 280px;font-weight:600}
+.barra .texto small{display:block;font-weight:400;color:var(--tenue)}
+dialog{border:none;border-radius:14px;padding:0;background:var(--hoja);color:var(--tinta);max-width:min(920px,94vw);width:100%;box-shadow:0 20px 60px rgba(0,0,0,.25)}
+dialog::backdrop{background:rgba(15,25,24,.55)}
+.dlg-cab{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:14px 18px;border-bottom:1px solid var(--linea)}
+.dlg-cab h2{font-size:16px;margin:0;word-break:break-word}
+.dlg-cuerpo{padding:18px}
+.dlg-cuerpo iframe,.dlg-cuerpo video,.dlg-cuerpo img{width:100%;height:70vh;border:0;object-fit:contain;background:var(--papel);border-radius:8px}
+.dlg-cuerpo ol{padding-left:20px}
+.dlg-pie{display:flex;justify-content:flex-end;gap:8px;padding:12px 18px;border-top:1px solid var(--linea)}
+details.historial{margin-top:28px;color:var(--tenue);font-size:14px}
+details.historial summary{cursor:pointer;font-weight:600;color:var(--tinta)}
+details.historial table{width:100%;border-collapse:collapse;margin-top:10px;font-size:13px}
+details.historial td{padding:6px 8px;border-bottom:1px solid var(--linea);word-break:break-word;vertical-align:top}
+@media (max-width:820px){
+  .grupo{grid-template-columns:1fr}
+  .enlace{height:30px}
+  .enlace::before{inset:50% 0 auto;border-left:none;border-top:2px dashed var(--linea)}
+  .copia{grid-template-columns:24px 44px 1fr}
+  .copia .fin-copia{grid-column:3;justify-self:start;gap:12px;flex-wrap:wrap}
+  .herramientas{position:static}
+  .envoltura{padding:20px 16px 160px}
+  .barra .dentro{padding:12px 16px}
+}
+@media (prefers-reduced-motion:reduce){.barra{transition:none}}
+</style>
+</head>
+<body>
+<div class="envoltura">
+  <header class="cabecera">
+    <p class="titulo">Duplicados en revisión · DESCARGAS</p>
+    <h1 class="resumen" id="resumen"></h1>
+    <p class="nota" id="nota"></p>
+  </header>
+
+  <div class="herramientas" role="search">
+    <input type="search" id="buscar" placeholder="Buscar por nombre o carpeta" aria-label="Buscar por nombre o carpeta">
+    <select id="fArea" aria-label="Área"></select>
+    <select id="fTipo" aria-label="Tipo de archivo"></select>
+    <select id="fEstado" aria-label="Estado">
+      <option value="">Todos los estados</option>
+      <option value="procede">Se pueden borrar</option>
+      <option value="no">No se pueden borrar</option>
+      <option value="sol">Borrado ya solicitado</option>
+    </select>
+    <select id="orden" aria-label="Ordenar">
+      <option value="espacio">Más espacio primero</option>
+      <option value="copias">Más copias primero</option>
+      <option value="nombre">Nombre A–Z</option>
+      <option value="area">Área</option>
+    </select>
+    <button class="boton" id="selVisibles" type="button">Marcar las copias visibles que se pueden borrar</button>
+    <span class="contador" id="contador"></span>
+  </div>
+
+  <main id="lista" aria-live="polite"></main>
+  <nav class="paginacion" id="paginacion" aria-label="Páginas"></nav>
+
+  <details class="historial" id="historial">
+    <summary>Borrados realizados</summary>
+    <div id="historialCuerpo"></div>
+  </details>
+</div>
+
+<div class="barra" id="barra" role="region" aria-label="Selección para borrar">
+  <div class="dentro">
+    <div class="texto" id="barraTexto"></div>
+    <button class="boton" id="limpiar" type="button">Quitar marcas</button>
+    <button class="boton principal" id="solicitar" type="button">Borrar las copias marcadas</button>
+  </div>
+</div>
+
+<dialog id="dlgVista"><div class="dlg-cab"><h2 id="vistaTitulo"></h2><button class="boton" type="button" data-cerrar>Cerrar</button></div><div class="dlg-cuerpo" id="vistaCuerpo"></div></dialog>
+
+<dialog id="dlgConfirmar">
+  <div class="dlg-cab"><h2>Borrar copias duplicadas</h2><button class="boton" type="button" data-cerrar>Cancelar</button></div>
+  <div class="dlg-cuerpo">
+    <p id="confTexto"></p>
+    <ol>
+      <li>Al pulsar «Crear solicitud» se descarga el archivo <b id="confArchivo"></b>.</li>
+      <li>Si su navegador guarda las descargas en <b>DESCARGAS</b>, no tiene que hacer nada más. Si las guarda en otra carpeta, mueva ese archivo a la raíz de <b>G:\Mi unidad\DESCARGAS</b>.</li>
+      <li>El vigilante lo recoge en su siguiente pasada (como mucho 10 minutos). Antes de borrar cada copia comprueba que el original sigue en su carpeta y que el contenido de ambos es idéntico. Si algo no cuadra, no borra esa copia.</li>
+      <li>Las copias borradas van a la papelera de Google Drive, donde se pueden recuperar durante 30 días. El resultado queda en <b>_ORGANIZACION\borrados_solicitudes</b> y este panel se actualiza solo.</li>
+    </ol>
+  </div>
+  <div class="dlg-pie"><button class="boton" type="button" data-cerrar>Cancelar</button><button class="boton principal" type="button" id="confirmar">Crear solicitud</button></div>
+</dialog>
+
+<!-- v1.10.2: los datos van en tres archivos rotatorios de la carpeta _panel; se usa el mas reciente que se haya cargado bien.
+     Asi un archivo bloqueado (vista previa del Explorador, sincronizacion de Drive) no impide actualizar el panel. -->
+<script src="_panel/datos_1.js"></script>
+<script src="_panel/datos_2.js"></script>
+<script src="_panel/datos_3.js"></script>
+<script>
+(function(){
+  "use strict";
+  var S = (window.PANEL_SLOTS || []).slice().sort(function(a,b){ return String(a.iso).localeCompare(String(b.iso)); });
+  var D = S.length ? S[S.length-1] : { generado: '—', grupos: [], borrados: [], sinDatos: true };
+  var G = D.grupos || [];
+  var POR_PAGINA = 40, pagina = 1;
+  var marcadas = new Map();          // ruta copia -> {grupo, copia}
+  var CLAVE = 'panelDuplicados.solicitadas';
+  var solicitadas = {};
+  try { solicitadas = JSON.parse(localStorage.getItem(CLAVE) || '{}') || {}; } catch(e) { solicitadas = {}; }
+  // las que ya no existen en el panel se olvidan
+  (function(){ var vivas = {}; G.forEach(function(g){ g.c.forEach(function(c){ vivas[c.r] = 1; }); });
+    Object.keys(solicitadas).forEach(function(k){ if(!vivas[k]) delete solicitadas[k]; });
+    try { localStorage.setItem(CLAVE, JSON.stringify(solicitadas)); } catch(e) {} })();
+
+  var IMG = /\.(jpe?g|png|gif|webp|bmp|svg)$/i, VID = /\.(mp4|webm|mov|m4v)$/i, PDF = /\.pdf$/i;
+  function esc(s){ return String(s).replace(/[&<>"']/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
+  function url(rel, esCopia){
+    var p = rel.split('\\'); if (esCopia && p[0] === '_DUPLICADOS_REVISAR') p.shift(); else p.unshift('..');
+    return p.map(function(x){ return x === '..' ? x : encodeURIComponent(x); }).join('/');
+  }
+  function carpeta(rel){ var p = rel.split('\\'); p.pop(); return p.join('\\'); }
+  function hoja(rel){ var p = rel.split('\\'); return p[p.length-1]; }
+  function ext(rel){ var m = /\.([^.\\]+)$/.exec(rel); return m ? m[1].toLowerCase() : ''; }
+  function tam(b){ if (b == null) return ''; var u=['B','KB','MB','GB','TB'], i=0; b=+b; while(b>=1024&&i<4){b/=1024;i++;} return (i?b.toLocaleString('es-ES',{maximumFractionDigits:b<10?1:0}):b)+' '+u[i]; }
+  function num(n){ return Number(n).toLocaleString('es-ES'); }
+  function area(rel){ return rel.split('\\')[0]; }
+  function tipoDe(e){ if(/^(jpe?g|png|gif|webp|bmp|svg|tiff?|heic)$/.test(e)) return 'Imágenes';
+    if(e==='pdf') return 'PDF'; if(/^(docx?|odt|rtf|txt|md)$/.test(e)) return 'Textos';
+    if(/^(xlsx?|ods|csv)$/.test(e)) return 'Hojas de cálculo'; if(/^(pptx?|odp)$/.test(e)) return 'Presentaciones';
+    if(/^(zip|rar|7z|gz|tar)$/.test(e)) return 'Comprimidos'; if(/^(mp4|webm|mov|m4v|mp3|m4a|wav)$/.test(e)) return 'Audio y vídeo';
+    if(/^(exe|msi|apk|dmg)$/.test(e)) return 'Instaladores'; if(/^(kml|kmz|gml|shp|tif|geojson|las|laz)$/.test(e)) return 'Geodatos'; return 'Otros'; }
+  function procede(c){ return c.v === 'SHA' || c.v === 'ZIP' || c.v === 'TAM'; }
+  function estadoCopia(c){
+    if (solicitadas[c.r]) return ['sol','Solicitado '+solicitadas[c.r],'Solicitud de borrado creada; el vigilante la ejecuta en su siguiente pasada'];
+    if (c.v === 'SHA') return ['ok','Idéntica','Mismo SHA-256 que el original'];
+    if (c.v === 'ZIP') return ['ok','Mismo contenido','ZIP con los mismos archivos que el original; se comprueba de nuevo al borrar'];
+    if (c.v === 'TAM') return ['ver','Se verifica al borrar','Mismo tamaño que el original; el vigilante compara el contenido completo antes de borrar y no borra si difiere'];
+    return ['no','No se puede borrar', c.m || 'No se puede borrar'];
+  }
+  var nat = new Intl.Collator('es', {numeric:true, sensitivity:'base'});
+  G.forEach(function(g){
+    g.c.sort(function(a,b){ return nat.compare(a.r, b.r); });
+    g.area = area(g.o); g.tipo = tipoDe(ext(g.o));
+    g.libre = g.c.reduce(function(a,c){ return a + (procede(c) ? (+c.s||0) : 0); }, 0);
+    g.texto = (g.o + ' ' + g.c.map(function(c){ return c.r; }).join(' ') + ' ' + (g.otros||[]).join(' ')).toLowerCase();
+  });
+
+  // ---- cabecera
+  var nCopias = 0, nProc = 0, bytes = 0;
+  G.forEach(function(g){ nCopias += g.c.length; g.c.forEach(function(c){ if (procede(c)) { nProc++; bytes += (+c.s||0); } }); });
+  document.getElementById('resumen').innerHTML = G.length
+    ? '<span class="cifra">'+num(nCopias)+'</span> copias de <span class="cifra">'+num(G.length)+'</span> documentos ya clasificados. Borrarlas liberaría <span class="cifra">'+tam(bytes)+'</span>.'
+    : (D.sinDatos ? 'No se encuentran los datos del panel.' : 'No hay duplicados pendientes de revisión.');
+  if (D.sinDatos) { document.getElementById('nota').textContent = 'Falta la carpeta _panel junto a este archivo o todavía no se ha generado. El vigilante la crea en su siguiente pasada.'; }
+  else document.getElementById('nota').textContent = 'Generado el ' + D.generado + '. A la izquierda está el documento que se conserva, en su carpeta clasificada; a la derecha, sus copias en _DUPLICADOS_REVISAR. '
+    + (nCopias - nProc ? (nCopias - nProc === 1 ? '1 copia no se puede borrar porque su original no está localizado o no coincide; revísela a mano.' : num(nCopias - nProc) + ' copias no se pueden borrar porque su original no está localizado o no coincide; revíselas a mano.') : 'Todas las copias tienen su original localizado.')
+    + (D.incompleto ? ' La lista está incompleta: el recorrido superó el tiempo máximo y se completará en la próxima actualización.' : '');
+
+  // ---- filtros
+  function opciones(sel, valores, todos){ sel.innerHTML = '<option value="">'+todos+'</option>' + valores.map(function(v){ return '<option>'+esc(v)+'</option>'; }).join(''); }
+  function unicos(f){ var s = {}; G.forEach(function(g){ s[f(g)] = 1; }); return Object.keys(s).sort(); }
+  var fArea = document.getElementById('fArea'), fTipo = document.getElementById('fTipo'), fEstado = document.getElementById('fEstado'),
+      buscar = document.getElementById('buscar'), orden = document.getElementById('orden');
+  opciones(fArea, unicos(function(g){ return g.area; }), 'Todas las áreas');
+  opciones(fTipo, unicos(function(g){ return g.tipo; }), 'Todos los tipos');
+
+  function filtrados(){
+    var q = buscar.value.trim().toLowerCase(), a = fArea.value, t = fTipo.value, e = fEstado.value;
+    var r = G.filter(function(g){
+      if (q && g.texto.indexOf(q) < 0) return false;
+      if (a && g.area !== a) return false;
+      if (t && g.tipo !== t) return false;
+      if (e === 'procede' && !g.c.some(function(c){ return procede(c) && !solicitadas[c.r]; })) return false;
+      if (e === 'no' && !g.c.some(function(c){ return !procede(c); })) return false;
+      if (e === 'sol' && !g.c.some(function(c){ return solicitadas[c.r]; })) return false;
+      return true; });
+    var o = orden.value;
+    r.sort(function(x,y){
+      if (o === 'copias') return y.c.length - x.c.length || y.libre - x.libre;
+      if (o === 'nombre') return hoja(x.o).localeCompare(hoja(y.o), 'es');
+      if (o === 'area') return x.o.localeCompare(y.o, 'es');
+      return y.libre - x.libre; });
+    return r;
+  }
+
+  function miniatura(rel, esCopia, peq){
+    var e = ext(rel), u = url(rel, esCopia), cls = 'miniatura' + (peq ? ' peq' : '');
+    var dentro = IMG.test(rel) ? '<img loading="lazy" alt="" src="'+esc(u)+'" onerror="this.replaceWith(Object.assign(document.createElement(\'span\'),{className:\'ext\',textContent:\''+esc(e.toUpperCase())+'\'}))">'
+              : '<span class="ext">'+esc((e||'?').toUpperCase())+'</span>';
+    return '<button type="button" class="'+cls+'" data-ver="'+esc(rel)+'" data-copia="'+(esCopia?1:0)+'" title="Ver '+esc(hoja(rel))+'" aria-label="Ver '+esc(hoja(rel))+'">'+dentro+'</button>';
+  }
+  function hashCorto(h){ return h && h.length > 24 ? h.slice(0,12)+'…'+h.slice(-12) : (h||''); }
+  function rutaBonita(rel){ var p = carpeta(rel).split('\\'); return '<b>'+esc(p[0])+'</b>' + (p.length>1 ? ' \\ ' + esc(p.slice(1).join(' \\ ')) : ''); }
+
+  function pintaGrupo(g){
+    var noProc = g.c.some(function(c){ return !procede(c); });
+    var h = '<article class="grupo'+(noProc?' no-procede':'')+'">';
+    h += '<section class="lado-original" aria-label="Documento que se conserva">' + miniatura(g.o, false, false) + '<div>';
+    h += '<p class="nombre">'+esc(hoja(g.o))+'</p><p class="ruta">'+rutaBonita(g.o)+'</p>';
+    h += '<p class="datos">'+tam(g.os)+(g.sha?' · <span class="hash" title="SHA-256 '+esc(g.sha)+'">'+esc(hashCorto(g.sha))+'</span>':'')+(g.oe?'':' · <b style="color:var(--aviso)">original no localizado</b>')+'</p>';
+    if (g.otros && g.otros.length) h += '<p class="otros">También clasificado en: '+g.otros.map(function(o){ return esc(carpeta(o)); }).join('; ')+'</p>';
+    h += '<div class="acciones">' + (g.oe ? '<a class="boton" href="'+esc(url(g.o,false))+'" target="_blank" rel="noopener">Abrir</a><a class="boton" href="'+esc(url(carpeta(g.o)+'\\',false))+'" target="_blank" rel="noopener">Abrir carpeta</a>' : '') + '</div>';
+    h += '</div></section>';
+    h += '<div class="enlace" aria-hidden="true"><span>'+(noProc?'!':'=')+'</span></div>';
+    h += '<section class="lado-copias" aria-label="Copias en revisión">';
+    var carps = {}; g.c.forEach(function(c){ carps[carpeta(c.r)] = 1; }); var unaCarpeta = Object.keys(carps).length === 1;
+    if (unaCarpeta) h += '<p class="cab-copias">'+(g.c.length===1?'Copia en ':'Copias en ')+esc(carpeta(g.c[0].r))+'</p>';
+    g.c.forEach(function(c){
+      var est = estadoCopia(c), puede = procede(c) && !solicitadas[c.r], m = marcadas.has(c.r);
+      h += '<div class="copia'+(m?' marcada':'')+'">';
+      h += '<input type="checkbox" data-marca="'+esc(c.r)+'" '+(m?'checked ':'')+(puede?'':'disabled ')+'aria-label="Marcar para borrar '+esc(hoja(c.r))+'">';
+      h += miniatura(c.r, true, true);
+      h += '<div><p class="nombre">'+esc(hoja(c.r))+'</p>'+(unaCarpeta?'':'<p class="ruta">'+esc(carpeta(c.r))+'</p>')+'<p class="datos">'+tam(c.s)+(c.f?' · apartada el '+esc(c.f.split('-').reverse().join('/')):'')+'</p></div>';
+      h += '<div class="fin-copia">'+(c.h?'<span class="hash" title="SHA-256 '+esc(c.h)+'">'+esc(hashCorto(c.h))+'</span>':'<span class="hash" title="Huella no calculada; se verifica al borrar">sin huella</span>')+'<span class="estado '+est[0]+'" title="'+esc(est[2])+'">'+esc(est[1])+'</span></div></div>';
+      if (est[0] === 'no') h += '<p class="ruta" style="margin:-4px 8px 4px 88px;color:var(--aviso)">'+esc(est[2])+'</p>';
+    });
+    var libres = g.c.filter(function(c){ return procede(c) && !solicitadas[c.r]; });
+    h += '<div class="pie-grupo"><span>'+g.c.length+(g.c.length===1?' copia':' copias')+(g.libre?' · '+tam(g.libre)+' recuperables':'')+'</span>';
+    h += '<button type="button" class="boton peligro" data-grupo="'+esc(g.o)+'" '+(libres.length?'':'disabled')+'>Marcar las copias de este grupo</button></div>';
+    h += '</section></article>';
+    return h;
+  }
+
+  var actuales = [];
+  function pinta(){
+    actuales = filtrados();
+    var paginas = Math.max(1, Math.ceil(actuales.length / POR_PAGINA)); if (pagina > paginas) pagina = paginas;
+    var trozo = actuales.slice((pagina-1)*POR_PAGINA, pagina*POR_PAGINA);
+    var lista = document.getElementById('lista');
+    lista.innerHTML = trozo.length ? trozo.map(pintaGrupo).join('')
+      : '<div class="vacio">'+(G.length ? 'Ningún grupo coincide con los filtros. Cambie la búsqueda o elija «Todas las áreas».' : 'No hay copias en _DUPLICADOS_REVISAR.')+'</div>';
+    document.getElementById('contador').textContent = num(actuales.length) + (actuales.length===1?' grupo':' grupos');
+    var nav = document.getElementById('paginacion');
+    nav.innerHTML = paginas > 1 ? '<button class="boton" type="button" data-pag="'+(pagina-1)+'" '+(pagina<=1?'disabled':'')+'>Anterior</button><span>Página '+pagina+' de '+paginas+'</span><button class="boton" type="button" data-pag="'+(pagina+1)+'" '+(pagina>=paginas?'disabled':'')+'>Siguiente</button>' : '';
+    barra();
+  }
+  function barra(){
+    var n = marcadas.size, b = 0; marcadas.forEach(function(v){ b += (+v.c.s||0); });
+    document.getElementById('barra').classList.toggle('visible', n > 0);
+    document.getElementById('barraTexto').innerHTML = num(n) + (n===1?' copia marcada':' copias marcadas') + ' · ' + tam(b) + '<small>Se conserva siempre el documento de la izquierda.</small>';
+  }
+  function grupoDe(rel){ for (var i=0;i<G.length;i++){ for (var j=0;j<G[i].c.length;j++){ if (G[i].c[j].r === rel) return [G[i], G[i].c[j]]; } } return null; }
+  function marca(g, c, si){ if (si && procede(c) && !solicitadas[c.r]) marcadas.set(c.r, {g:g, c:c}); else marcadas.delete(c.r); }
+
+  document.addEventListener('click', function(ev){
+    var t = ev.target.closest('[data-grupo],[data-pag],[data-ver],[data-cerrar]'); if (!t) return;
+    if (t.hasAttribute('data-cerrar')) { t.closest('dialog').close(); return; }
+    if (t.hasAttribute('data-pag')) { pagina = +t.getAttribute('data-pag'); pinta(); window.scrollTo(0, 0); return; }
+    if (t.hasAttribute('data-grupo')) { var o = t.getAttribute('data-grupo'); var g = G.filter(function(x){ return x.o === o; })[0];
+      var todas = g.c.filter(function(c){ return procede(c) && !solicitadas[c.r]; }).every(function(c){ return marcadas.has(c.r); });
+      g.c.forEach(function(c){ marca(g, c, !todas); }); pinta(); return; }
+    if (t.hasAttribute('data-ver')) { ver(t.getAttribute('data-ver'), t.getAttribute('data-copia') === '1'); }
+  });
+  document.addEventListener('change', function(ev){
+    var t = ev.target; if (!t.hasAttribute || !t.hasAttribute('data-marca')) return;
+    var gc = grupoDe(t.getAttribute('data-marca')); if (gc) { marca(gc[0], gc[1], t.checked); t.closest('.copia').classList.toggle('marcada', t.checked); barra(); }
+  });
+  [buscar, fArea, fTipo, fEstado, orden].forEach(function(el){ el.addEventListener(el === buscar ? 'input' : 'change', function(){ pagina = 1; pinta(); }); });
+  document.getElementById('selVisibles').addEventListener('click', function(){
+    actuales.forEach(function(g){ g.c.forEach(function(c){ marca(g, c, true); }); }); pinta(); });
+  document.getElementById('limpiar').addEventListener('click', function(){ marcadas.clear(); pinta(); });
+
+  function ver(rel, esCopia){
+    var u = url(rel, esCopia), cuerpo = document.getElementById('vistaCuerpo');
+    document.getElementById('vistaTitulo').textContent = hoja(rel);
+    if (IMG.test(rel)) cuerpo.innerHTML = '<img alt="" src="'+esc(u)+'">';
+    else if (VID.test(rel)) cuerpo.innerHTML = '<video controls preload="metadata" src="'+esc(u)+'"></video>';
+    else if (PDF.test(rel)) cuerpo.innerHTML = '<iframe title="Vista previa" src="'+esc(u)+'"></iframe>';
+    else cuerpo.innerHTML = '<p>Este tipo de archivo no tiene vista previa aquí.</p><p><a class="boton" href="'+esc(u)+'" target="_blank" rel="noopener">Abrir '+esc(hoja(rel))+'</a></p>';
+    document.getElementById('dlgVista').showModal();
+  }
+  document.getElementById('dlgVista').addEventListener('close', function(){ document.getElementById('vistaCuerpo').innerHTML = ''; });
+
+  function marcaTiempo(){ var d = new Date(), p = function(n){ return String(n).padStart(2,'0'); };
+    return [d.getFullYear()+p(d.getMonth()+1)+p(d.getDate()), p(d.getHours())+p(d.getMinutes())+p(d.getSeconds())]; }
+  var nombreSolicitud = '';
+  document.getElementById('solicitar').addEventListener('click', function(){
+    var b = 0; marcadas.forEach(function(v){ b += (+v.c.s||0); });
+    var m = marcaTiempo(); nombreSolicitud = 'SOLICITUD_BORRADO_DUPLICADOS_' + m[0] + '_' + m[1] + '.csv';
+    document.getElementById('confTexto').textContent = 'Va a pedir el borrado de ' + num(marcadas.size) + (marcadas.size===1?' copia':' copias') + ' (' + tam(b) + '). Los documentos originales no se tocan.';
+    document.getElementById('confArchivo').textContent = nombreSolicitud;
+    document.getElementById('dlgConfirmar').showModal();
+  });
+  document.getElementById('confirmar').addEventListener('click', function(){
+    var q = function(s){ return '"' + String(s == null ? '' : s).replace(/"/g, '""') + '"'; };
+    var lineas = ['"RutaDuplicado";"RutaOriginal";"Tipo";"Tamano";"SHA256";"Solicitado"'];
+    var ahora = new Date().toISOString().slice(0,19);
+    marcadas.forEach(function(v){ lineas.push([v.c.r, v.g.o, v.c.v === 'ZIP' ? 'ZIP' : 'SHA', v.c.s, v.c.h || '', ahora].map(q).join(';')); });
+    var blob = new Blob(['\ufeff' + lineas.join('\r\n') + '\r\n'], {type:'text/csv;charset=utf-8'});
+    var a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = nombreSolicitud; document.body.appendChild(a); a.click();
+    setTimeout(function(){ URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+    var f = new Date().toLocaleString('es-ES', {day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit'});
+    marcadas.forEach(function(v, k){ solicitadas[k] = f; });
+    try { localStorage.setItem(CLAVE, JSON.stringify(solicitadas)); } catch(e) {}
+    marcadas.clear(); document.getElementById('dlgConfirmar').close(); pinta();
+  });
+
+  // ---- historial
+  var H = D.borrados || [];
+  document.getElementById('historial').hidden = !H.length;
+  if (H.length) document.getElementById('historialCuerpo').innerHTML = '<table><tbody>' + H.map(function(x){
+    return '<tr><td>'+esc(x.f)+'</td><td>'+esc(x.r)+'</td><td>'+esc(x.e)+'</td></tr>'; }).join('') + '</tbody></table>';
+
+  pinta();
+})();
+</script>
+</body>
+</html>
+'@
+$utf8 = New-Object Text.UTF8Encoding $true
+# --- datos: ranura rotatoria (la mas antigua primero; si esta bloqueada, la siguiente) ---
+if (-not (Test-Path -LiteralPath $pdir)) { New-Item -ItemType Directory -Path $pdir | Out-Null }
+$js = '(window.PANEL_SLOTS = window.PANEL_SLOTS || []).push(' + $json + ');'
+$ranuras = @(1..3 | ForEach-Object { $p = Join-Path $pdir ("datos_{0}.js" -f $_); [pscustomobject]@{ Ruta = $p; Fecha = $(if (Test-Path -LiteralPath $p) { (Get-Item -LiteralPath $p).LastWriteTime } else { [datetime]::MinValue }) } } | Sort-Object Fecha)
+$escrita = $null; $fallos = @()
+foreach ($r in $ranuras) { try { [IO.File]::WriteAllText($r.Ruta, $js, $utf8); $escrita = Split-Path -Leaf $r.Ruta; break } catch { $fallos += ((Split-Path -Leaf $r.Ruta) + ': ' + $_.Exception.Message) } }
+# --- HTML fijo: solo se reescribe si falta o si cambia la plantilla ---
+$estadoHtml = 'sin_cambios'
+$actual = $null; try { if (Test-Path -LiteralPath $salida) { $actual = [IO.File]::ReadAllText($salida) } } catch { }
+if ($actual -ne $plantilla) {
+  try { [IO.File]::WriteAllText($salida, $plantilla, $utf8); $estadoHtml = 'actualizado' }
+  catch { $alt = Join-Path $dupDir 'PANEL_DUPLICADOS_2.html'
+          try { [IO.File]::WriteAllText($alt, $plantilla, $utf8); $estadoHtml = 'bloqueado; escrito PANEL_DUPLICADOS_2.html' } catch { $estadoHtml = 'bloqueado' } } }
+# temporales de versiones anteriores del propio panel (no son documentos)
+Get-ChildItem -LiteralPath $dupDir -Filter 'PANEL_DUPLICADOS.tmp*' -File -ErrorAction SilentlyContinue | ForEach-Object { try { Remove-Item -LiteralPath $_.FullName -ErrorAction Stop } catch { } }
+$res = [pscustomobject]@{ Grupos = $grupos.Count; Copias = ($grupos.Values | ForEach-Object { $_.c.Count } | Measure-Object -Sum).Sum; Incompleto = $cortado; Ranura = $escrita; Html = $estadoHtml; Fallos = ($fallos -join ' | '); Segundos = [int]$reloj.Elapsed.TotalSeconds }
+try { $res | ConvertTo-Json -Compress | Set-Content -LiteralPath (Join-Path $org 'panel_ultimo.json') -Encoding UTF8 } catch { }
+if (-not $escrita) { throw ('ninguna ranura de datos escribible: ' + ($fallos -join ' | ')) }
+$res
