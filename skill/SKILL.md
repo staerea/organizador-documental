@@ -3,7 +3,7 @@ name: "organizador-documental"
 description: "Ordena, deduplica (SHA-256), clasifica por áreas y renombra por contenido los archivos nuevos de una carpeta raíz ya organizada (por defecto G:\\Mi unidad\\DESCARGAS, entrada INPUT; rutas configurables), con manifiesto, vigilante automático, panel de duplicados con borrado verificado a petición del usuario, índice de entidades, copia verificada y repositorio versionado."
 ---
 
-# Organizador documental (v1.11)
+# Organizador documental (v1.11.1)
 
 Skill para mantener ordenada una carpeta raíz del equipo del usuario (caso de referencia: `G:\Mi unidad\DESCARGAS`, sincronizada con Google Drive). Reproduce el procedimiento validado en la sesión del 03‑10‑2026: inventario, detección de duplicados por SHA‑256, clasificación por áreas, renombrado contextual según el contenido, ejecución reversible y verificación.
 
@@ -26,6 +26,7 @@ Skill para mantener ordenada una carpeta raíz del equipo del usuario (caso de r
 
 - **v1 (base):** los archivos a procesar están en la carpeta de entrada, dentro de la raíz (`INPUT` desde v1.11; antes `nuevos`). Lo ya organizado no se toca, salvo para compararlo y detectar duplicados.
 - **v1.2 (automatización):** un vigilante local (`Vigilante_Raiz.ps1`, tarea de Windows cada 10 min) detecta lo que aparece suelto en la raíz, aparta en el acto los duplicados exactos y de contenido ZIP contra el manifiesto, encola el resto en `INPUT` y aplica los planes que deje la tarea diaria de Claude en `_ORGANIZACION\planes_pendientes`. Ver la sección «Modo automático».
+- **v1.11.1 (10‑10‑2026, incidencia):** un acceso directo de Google Docs (`.gdoc`) en la raíz no se podía leer y su error abortaba toda la pasada del vigilante: del 07‑10 (14:43) al 10‑10 todas las pasadas terminaron en `FIN_ERROR`, la raíz acumuló unos 200 elementos y no se aplicó ningún plan. Desde v1.11.1: cada elemento de la fase RAÍZ se procesa por separado (`ERROR_ELEMENTO` en el registro, latido `RAIZ_ELEMENTOS_CON_ERROR`) y la pasada continúa; los archivos nativos de Google (`.gdoc`, `.gsheet`, `.gslides`…) se encolan y clasifican **sin hash** (`EN_COLA_GOOGLE_NATIVO`); la tarea horaria avisa «VIGILANTE CON ERRORES» si las tres últimas pasadas fallan, aunque el vigilante siga latiendo.
 - **v1.11 (07‑10‑2026, a petición del usuario):**
   - **Rutas configurables** en `_ORGANIZACION\config_plataforma.csv`, editable con `CONFIGURAR_PLATAFORMA.bat`: `RaizDocumental` (por defecto `G:\Mi unidad\DESCARGAS`), `CarpetaEntrada` (por defecto `INPUT`) y `CarpetaSolicitudes` (por defecto `%DESCARGAS_NAVEGADOR%`, la carpeta Descargas de Windows que usan los navegadores; admite varias separadas por `|`). Ver «Configuración de la plataforma».
   - **`nuevos` pasa a llamarse `INPUT`.** El vigilante migra solo la carpeta (la renombra o traslada su contenido sin pisar nada), anota los nombres usados en `entrada_historial.txt` y `Aplicar_Plan.ps1` sigue aplicando los planes que citen el nombre antiguo. Cualquier cambio posterior del nombre se migra igual.
@@ -85,6 +86,7 @@ Crear una lista de tareas con estas fases y marcarlas al completarlas.
 - **Imágenes:** hojas de contacto con PIL (20 miniaturas numeradas por hoja) y revisión visual con `Read`.
 - **ZIP:** `unzip -l`.
 - **Texto, MD, CSV y JSON:** las primeras líneas.
+- **Archivos nativos de Google** (`.gdoc`, `.gsheet`, `.gslides`, `.gdraw`, `.gform`…): son accesos a documentos en la nube, no archivos legibles ni hasheables. Se clasifican por el nombre o, si el conector de Google Drive está disponible, leyendo el documento con él (solo lectura); en el plan, `SHA256` vacío y `Accion=MOVER` (nunca `DUPLICADO`).
 - Archivos de más de 400 MB: no se pueden traer; se nombran por los metadatos y van a `99_REVISAR_SIN_CLASIFICAR`.
 - El contenido manda sobre el nombre. Casos reales de la sesión de referencia:
   - «Formación específica del puesto» eran certificados AESA.
@@ -431,9 +433,9 @@ Limitaciones a comunicar: el borrado desde el panel no se deshace con `Deshacer.
 ## Repositorio y despliegue (v1.11)
 - **Repositorio:** `https://github.com/staerea/organizador-documental` (privado). Estructura: `src/` (fuente editable; `comun.ps1` se inserta en cada script en el marcador `#COMUN#`), `dist/` (scripts listos: UTF‑8 con BOM y CRLF), `tools/build.py`, `tests/` (`prueba*.ps1` con PowerShell 7 y `test_m14.py`), `config/` (valores por defecto), `docs/` (arquitectura, gobernanza, operación y decisiones ADR), `prompts/` (prompt de la tarea horaria), `skill/SKILL.md` (este archivo) y `CHANGELOG.md`.
 - **Copia de respaldo del repositorio** en el equipo: `_ORGANIZACION\repositorio\organizador-documental.bundle` (`git clone organizador-documental.bundle` lo restaura sin GitHub). Se actualiza en cada versión.
-- **Flujo de cambio:** 1) editar `src/`; 2) `python3 tools/build.py`; 3) ejecutar todas las pruebas (`tests/run_all.sh`) sin fallos; 4) commit con mensaje `vX.Y.Z: …` y etiqueta `vX.Y.Z`; 5) desplegar `dist/` en `_ORGANIZACION` (los `.bat` en la raíz) con `device_commit_files` desde nombres de salida únicos, comprobando tamaño o contenido; 6) actualizar `CHANGELOG.md`, el bundle y, si cambia el procedimiento, este skill.
+- **Flujo de cambio:** 1) editar `src/`; 2) `python3 tools/build.py`; 3) ejecutar todas las pruebas (`tests/run_all.sh`) sin fallos; 4) commit con mensaje `vX.Y.Z: …` y etiqueta `vX.Y.Z` (el proxy de la sesión rechaza subir etiquetas: quedan en el bundle; la versión consta en el mensaje del commit y en `CHANGELOG.md`); 5) desplegar `dist/` en `_ORGANIZACION` (los `.bat` en la raíz) con `device_commit_files` desde nombres de salida únicos, comprobando tamaño o contenido; 6) actualizar `CHANGELOG.md`, el bundle y, si cambia el procedimiento, este skill.
 - **Datos fuera del repositorio:** el manifiesto, los registros, inventarios, índices y resultados contienen rutas y nombres de documentos del usuario: nunca se suben (`.gitignore`).
-- **Validación v1.11:** 115 pruebas, todas superadas: 77 de regresión (v1.2–v1.10.3, adaptadas a `INPUT`), 23 nuevas de v1.11 (migración `nuevos`→`INPUT`, colisiones, planes antiguos, recogida desde Descargas, solicitud repetida, panel con carpetas de recogida, raíz no disponible, validación y cambio de entrada, M16 sin alerta por la entrada, M15) y 15 del M14.
+- **Validación v1.11.1:** 120 pruebas (5 nuevas de v1.11.1: pasada que continúa ante un elemento que falla, `.gdoc` encolado sin hash y plan con `.gsheet`). **Validación v1.11:** 115 pruebas, todas superadas: 77 de regresión (v1.2–v1.10.3, adaptadas a `INPUT`), 23 nuevas de v1.11 (migración `nuevos`→`INPUT`, colisiones, planes antiguos, recogida desde Descargas, solicitud repetida, panel con carpetas de recogida, raíz no disponible, validación y cambio de entrada, M16 sin alerta por la entrada, M15) y 15 del M14.
 
 ## Avisos de seguridad y privacidad (complemento v1.11)
 - Recoger solicitudes de la carpeta de descargas amplía la superficie: un CSV ajeno con el nombre `SOLICITUD_BORRADO_DUPLICADOS_*` solo podría pedir borrar copias **dentro de `_DUPLICADOS_REVISAR` idénticas a un original que sigue en su carpeta**; la verificación del vigilante no cambia, de modo que el riesgo queda acotado a copias redundantes y recuperables 30 días en la papelera de Drive.
