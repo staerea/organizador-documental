@@ -2,6 +2,10 @@
 
 Formato: [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/); versiones `MAYOR.MENOR.PARCHE`.
 
+## [1.11.3] — 2026-10-10
+### Cambiado
+- Tarea horaria con **triaje ligero** (ahorro de cuota): comprueba salud, planes pendientes, entrada, M14 e informes diarios leyendo solo archivos pequeños (los grandes se analizan en el contenedor sin volcarlos) y **solo carga el skill si hay un bloque que clasificar**; sin trabajo ni avisos termina sin informe. No cambia ningún resultado ni ningún script del equipo.
+
 ## [1.11.2] — 2026-10-10
 ### Seguridad (incidencia del 10‑10‑2026: seis solicitudes antiguas ejecutadas al desplegar la v1.11.1 sin confirmación expresa)
 - **Caducidad de solicitudes de borrado** (`CaducidadSolicitudHoras`, 24 h): una solicitud no iniciada más antigua, o sin fecha válida, pasa a `borrados_solicitudes\pendientes_confirmacion` (latido `SOLICITUDES_CADUCADAS`) y el panel permite volver a marcar esas copias.
