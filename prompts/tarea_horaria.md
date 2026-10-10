@@ -13,8 +13,8 @@ AHORRO DE CUOTA (v1.11.3): las comprobaciones del paso 0 se hacen SIN cargar el 
    g) Triaje: lista RAIZ\ENTRADA (no recursivo) y descuenta los nombres de RAIZ\_ORGANIZACION\nuevos_en_espera.txt. HAY_BLOQUE = quedan elementos y no hay plan pendiente (paso f). HAY_M14 = la fila M14 de config_modulos.csv tiene Activo=SI y m14_estado.csv no indica cobertura completa (si en el paso 4 el lote resulta vacío, no informes nada del M14). HAY_DIARIO = es la primera ejecución del día con informes por hacer (no existe RAIZ\_ORGANIZACION\modulos\M18\<AAAAMMDD de hoy>\ ni ...\M19\<AAAAMMDD de hoy>\).
       - Si no hay avisos de los pasos c–e y HAY_BLOQUE, HAY_M14 y HAY_DIARIO son falsos: termina aquí, sin cargar el skill y sin informe.
       - Si hay avisos pero ningún trabajo: escribe el resumen con los avisos (paso 7) y termina, sin cargar el skill.
-      - Si HAY_BLOQUE: carga ahora el skill organizador-documental (herramienta Skill; si no se puede cargar, dilo y continúa con estas instrucciones) y sigue en el paso 1.
-      - Si solo hay HAY_M14 o HAY_DIARIO: no cargues el skill; salta al paso 4 (estas instrucciones bastan).
+      - Si HAY_BLOQUE o HAY_DIARIO (este último, como mucho una vez al día): carga ahora el skill organizador-documental (herramienta Skill; si no se puede cargar, dilo y continúa con estas instrucciones). Con HAY_BLOQUE sigue en el paso 1; si no, salta al paso 4.
+      - Si solo hay HAY_M14: no cargues el skill; salta al paso 4 (sus instrucciones bastan).
 
 1. Selección del bloque. Lista RAIZ\ENTRADA (si la salida es enorme, léela del archivo guardado con Python). Excluye los nombres que figuren en RAIZ\_ORGANIZACION\nuevos_en_espera.txt (pendientes de decisión del usuario; las líneas que empiezan por # son comentarios). Toma como máximo 60 elementos (archivos o carpetas), empezando por los más antiguos (mtime). Si la entrada está vacía (descontando los en espera), no clasifiques.
 
