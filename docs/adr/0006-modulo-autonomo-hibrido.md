@@ -1,0 +1,11 @@
+# ADR-0006 — Módulo autónomo local: opción C (híbrida), aplazada
+- **Estado:** elegida por el usuario el 10-10-2026; **desarrollo aplazado** hasta nueva orden.
+- **Contexto:**
+  - La clasificación inteligente la hace hoy la tarea horaria de Claude, que consume cuota de la suscripción.
+  - Se valoraron tres vías: A) módulo local que llama a la API de Anthropic; B) modelo de lenguaje local; C) híbrida.
+- **Decisión:**
+  - Opción C: reglas y extracción local primero (como M14) y llamada a la API solo para los documentos que las reglas no resuelvan.
+  - La clave de la API la crea el usuario y se guarda en el Administrador de credenciales de Windows; Claude nunca la ve ni la introduce.
+- **Consecuencias (cuando se desarrolle):**
+  - Pasará por la puerta de despliegue (inventario de efectos pendientes y confirmación expresa).
+  - Hasta entonces sigue vigente la tarea horaria v1.11.3 con triaje previo.
