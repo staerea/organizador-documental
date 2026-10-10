@@ -2,6 +2,14 @@
 
 Formato: [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/); versiones `MAYOR.MENOR.PARCHE`.
 
+## [1.11.1] — 2026-10-10
+### Corregido
+- **Incidencia 07‑10‑2026:** un acceso directo de Google Docs (`.gdoc`) en la raíz no se podía leer (`Get-FileHash`: «Función incorrecta») y su error abortaba la pasada completa. Desde el 07‑10 a las 14:43 todas las pasadas terminaron en `FIN_ERROR`: la raíz acumuló unos 200 elementos y no se aplicó ningún plan durante tres días. Ahora cada elemento de la fase RAÍZ se procesa en su propio bloque de errores (`ERROR_ELEMENTO` en el registro, latido `RAIZ_ELEMENTOS_CON_ERROR`) y la pasada continúa.
+- Los archivos nativos de Google (`.gdoc`, `.gsheet`, `.gslides`…) se encolan sin hash (`EN_COLA_GOOGLE_NATIVO`) y `Aplicar_Plan.ps1` los mueve sin calcular su SHA‑256.
+### Cambiado
+- Tarea horaria: aviso «VIGILANTE CON ERRORES» cuando las tres últimas pasadas terminan en `FIN_ERROR` (antes solo se avisaba si dejaba de latir), y criterio para clasificar archivos nativos de Google.
+- Pruebas: `prueba9.ps1` (5 casos). Total: 120.
+
 ## [1.11] — 2026-10-07
 ### Añadido
 - `config_plataforma.csv` con `RaizDocumental` (por defecto `G:\Mi unidad\DESCARGAS`), `CarpetaEntrada` (por defecto `INPUT`) y `CarpetaSolicitudes` (por defecto `%DESCARGAS_NAVEGADOR%`, la carpeta Descargas de Windows). Herramienta `Configurar_Plataforma.ps1` y lanzador `CONFIGURAR_PLATAFORMA.bat`.

@@ -34,6 +34,8 @@ function Resolve-CarpetasSolicitudes([string]$valor) {
     if ($x -ieq '%DESCARGAS_NAVEGADOR%') { $x = Get-CarpetaDescargasNavegador } else { $x = [Environment]::ExpandEnvironmentVariables($x) }
     if ($x -and -not $r.Contains($x)) { $r.Add($x) } }
   return ,$r }
+# --- v1.11.1: archivos nativos de Google (.gdoc, .gsheet...) son accesos a documentos en la nube: no se pueden leer ni hashear ---
+function Test-GoogleNativo([string]$ruta) { return ([IO.Path]::GetExtension($ruta) -imatch '^\.(gdoc|gsheet|gslides|gdraw|gform|gmap|gsite|gjam|gtable|gscript|glink|gnote)$') }
 function Get-ZipHuella {
   # Huella de contenido de un ZIP: SHA-256 de la lista ordenada "ruta|tamano|CRC32" de sus archivos,
   # leida del directorio central (sin descomprimir). Ignora fechas internas, orden y nivel de compresion.
@@ -85,7 +87,7 @@ $logPath = Join-Path $org "registro_$sello.csv"
 function Reg($o,$d,$e) { $r = [pscustomobject]@{Origen=$o;Destino=$d;Estado=$e}; $log.Add($r); $r | Export-Csv -LiteralPath $logPath -Delimiter ';' -NoTypeInformation -Encoding UTF8 -Append }
 $nuevosMan = New-Object System.Collections.Generic.List[object]
 function Sha([string]$p) { (Get-FileHash -LiteralPath $p -Algorithm SHA256).Hash.ToLower() }
-function ShaMan([string]$p) { if ((Get-Item -LiteralPath $p).Length -gt $MaxHashMB * 1MB) { return '' }; Sha $p }   # v1.10.1
+function ShaMan([string]$p) { if (Test-GoogleNativo $p) { return '' }; if ((Get-Item -LiteralPath $p).Length -gt $MaxHashMB * 1MB) { return '' }; Sha $p }   # v1.10.1
 $reloj = [Diagnostics.Stopwatch]::StartNew(); $i = -1
 function Libre([string]$dir,[string]$n,[bool]$carpeta) {
   $t = Join-Path $dir $n; if (-not (Test-Path -LiteralPath $t)) { return $t }

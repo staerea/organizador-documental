@@ -2,7 +2,7 @@
 
 Plataforma de gestión documental automatizada para una carpeta raíz sincronizada con Google Drive (por defecto `G:\Mi unidad\DESCARGAS`). Ordena, deduplica por SHA‑256, clasifica por áreas y renombra por contenido lo que llega a la bandeja de entrada (`INPUT`). Todo es reversible y queda registrado. Solo se borran copias redundantes verificadas, y únicamente cuando el usuario lo solicita.
 
-**Versión actual:** 1.11 (07‑10‑2026). Historial en [CHANGELOG.md](CHANGELOG.md).
+**Versión actual:** 1.11.1 (10‑10‑2026). Historial en [CHANGELOG.md](CHANGELOG.md).
 
 ## Componentes
 
@@ -36,7 +36,7 @@ skill/      SKILL.md del skill organizador-documental
 
 ```bash
 python3 tools/build.py          # src/ -> dist/
-bash tests/run_all.sh           # 115 pruebas; requiere pwsh 7 y python3 con reportlab
+bash tests/run_all.sh           # 120 pruebas; requiere pwsh 7 y python3 con reportlab
 ```
 
 ## Desplegar

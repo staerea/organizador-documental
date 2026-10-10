@@ -27,6 +27,8 @@ function Resolve-CarpetasSolicitudes([string]$valor) {
     if ($x -ieq '%DESCARGAS_NAVEGADOR%') { $x = Get-CarpetaDescargasNavegador } else { $x = [Environment]::ExpandEnvironmentVariables($x) }
     if ($x -and -not $r.Contains($x)) { $r.Add($x) } }
   return ,$r }
+# --- v1.11.1: archivos nativos de Google (.gdoc, .gsheet...) son accesos a documentos en la nube: no se pueden leer ni hashear ---
+function Test-GoogleNativo([string]$ruta) { return ([IO.Path]::GetExtension($ruta) -imatch '^\.(gdoc|gsheet|gslides|gdraw|gform|gmap|gsite|gjam|gtable|gscript|glink|gnote)$') }
 if (-not $Entrada) { $Entrada = (Get-ConfigPlataforma (Join-Path $Raiz '_ORGANIZACION')).CarpetaEntrada }   # v1.11
 function Get-ZipHuella {
   # Huella de contenido de un ZIP: SHA-256 de la lista ordenada "ruta|tamano|CRC32" de sus archivos,

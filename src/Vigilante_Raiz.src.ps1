@@ -232,13 +232,15 @@ try {
     if ($nBorr -or $nRech) { Latido 'BORRADOS' ("borrados={0} no_borrados={1}" -f $nBorr, $nRech) }
   }
   Fase 'RAIZ'
-  $nMov = 0; $nPend = 0; $nDupRaiz = 0
+  $nMov = 0; $nPend = 0; $nDupRaiz = 0; $nErrEl = 0
   foreach ($it in @(Get-ChildItem -LiteralPath $Raiz -Force)) {
+   try {   # v1.11.1: un elemento que falla se registra y se salta; ya no detiene la pasada (incidencia 07-10-2026, .gdoc)
     if ($it.Name -eq $Entrada -or ($it.PSIsContainer -and @($anteriores) -icontains $it.Name) -or ($it.PSIsContainer -and $it.Name -imatch $exclDirRx) -or (-not $it.PSIsContainer -and $it.Name -imatch $exclRx) -or $exclExtra -contains $it.Name) { continue }
     if (((Get-Date) - $t0).TotalMinutes -ge $PresupuestoRaizMin) { $nPend++; continue }   # v1.9.2: se cuentan y quedan para la proxima pasada
     if (-not (Estable $it)) { continue }
     $src = $it.FullName; $destino = $null; $estado = 'EN_COLA'
-    if (-not $it.PSIsContainer) {
+    if (-not $it.PSIsContainer -and (Test-GoogleNativo $src)) { $estado = 'EN_COLA_GOOGLE_NATIVO' }   # sin hash: es un acceso a un documento en la nube
+    elseif (-not $it.PSIsContainer) {
       $sha = (Get-FileHash -LiteralPath $src -Algorithm SHA256).Hash.ToLower(); $orig = $null; $suf = '__COPIA_'
       if ($porSha.ContainsKey($sha) -and (Test-Path -LiteralPath (Join-Path $Raiz $porSha[$sha]))) { $orig = $porSha[$sha]; $estado = 'DUPLICADO_VERIFICADO' }
       elseif ($it.Extension -ieq '.zip') { $zh = Get-ZipHuella $src
@@ -256,7 +258,9 @@ try {
     }
     $destino = Libre $entradaDir $it.Name $it.PSIsContainer
     Move-Item -LiteralPath $src -Destination $destino; Log $src $destino $estado; $nMov++
+   } catch { $nErrEl++; Log $it.FullName '' ('ERROR_ELEMENTO: ' + $_.Exception.Message) }
   }
+  if ($nErrEl) { Latido 'RAIZ_ELEMENTOS_CON_ERROR' ("{0} elementos no se pudieron procesar (detalle en el registro); el resto de la pasada continua" -f $nErrEl) }
   if ($nPend) { Latido 'RAIZ_APLAZADA' ("limite de {0} min; quedan {1} elementos en la raiz para la proxima pasada" -f $PresupuestoRaizMin, $nPend) }
   # --- planes que deja la clasificacion diaria de Claude ---
   Fase 'PLANES'; $nPlan = 0
@@ -287,7 +291,7 @@ try {
           if ($rp -and $rp.Ranura) { Latido 'PANEL_ACTUALIZADO' ("grupos={0} copias={1} incompleto={2} ranura={3} html={4}" -f $rp.Grupos, $rp.Copias, $rp.Incompleto, $rp.Ranura, $rp.Html) }
           else { Log '' '' ('PANEL_ERROR: el generador termino sin escribir datos' + $(if ($rp) { ' (' + $rp.Fallos + ')' } else { '' })) } } }
       catch { Log '' '' ('PANEL_ERROR: ' + $_.Exception.Message) } } }
-  try { [ordered]@{ version = '1.11'; ultimaPasada = (Get-Date -Format s); raiz = $Raiz; entrada = $Entrada; carpetasSolicitudes = @($carpetasSol); movidos = $nMov; planes = $nPlan; borrados = $nBorr } |
+  try { [ordered]@{ version = '1.11.1'; ultimaPasada = (Get-Date -Format s); raiz = $Raiz; entrada = $Entrada; carpetasSolicitudes = @($carpetasSol); movidos = $nMov; planes = $nPlan; borrados = $nBorr } |
         ConvertTo-Json | Set-Content -LiteralPath (Join-Path $org 'estado_plataforma.json') -Encoding UTF8 } catch { }
   Fase 'FIN'; Latido 'FIN_OK' ("movidos={0} planes={1} raiz_pendientes={2} conciliados={3} borrados={4}" -f $nMov, $nPlan, $nPend, $nConc, $nBorr)
 } catch { Log '' '' ('ERROR: ' + $_.Exception.Message); Latido 'FIN_ERROR' $_.Exception.Message }

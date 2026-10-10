@@ -35,6 +35,8 @@ function Resolve-CarpetasSolicitudes([string]$valor) {
     if ($x -ieq '%DESCARGAS_NAVEGADOR%') { $x = Get-CarpetaDescargasNavegador } else { $x = [Environment]::ExpandEnvironmentVariables($x) }
     if ($x -and -not $r.Contains($x)) { $r.Add($x) } }
   return ,$r }
+# --- v1.11.1: archivos nativos de Google (.gdoc, .gsheet...) son accesos a documentos en la nube: no se pueden leer ni hashear ---
+function Test-GoogleNativo([string]$ruta) { return ([IO.Path]::GetExtension($ruta) -imatch '^\.(gdoc|gsheet|gslides|gdraw|gform|gmap|gsite|gjam|gtable|gscript|glink|gnote)$') }
 $org = Join-Path $Raiz '_ORGANIZACION'; $man = Join-Path $org 'manifiesto_documental.csv'
 $dupDir = Join-Path $Raiz '_DUPLICADOS_REVISAR'; $salida = Join-Path $dupDir 'PANEL_DUPLICADOS.html'; $pdir = Join-Path $dupDir '_panel'
 if (-not (Test-Path -LiteralPath $dupDir)) { New-Item -ItemType Directory -Path $dupDir | Out-Null }
