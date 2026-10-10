@@ -1,8 +1,9 @@
-﻿<#  PANEL DE DUPLICADOS (organizador-documental v1.11).
+﻿<#  PANEL DE DUPLICADOS (organizador-documental v1.11.2).
     Genera _DUPLICADOS_REVISAR\PANEL_DUPLICADOS.html: un registro por grupo (documento clasificado que se conserva + todas sus
     copias en _DUPLICADOS_REVISAR), con miniaturas, ubicacion, estado de verificacion y marcado para borrar.
     El panel NO borra: crea SOLICITUD_BORRADO_DUPLICADOS_<fecha>.csv, que el vigilante verifica (SHA-256 o huella ZIP,
     original presente fuera de _DUPLICADOS_REVISAR) y ejecuta. Este script solo lee y escribe el propio panel.
+    v1.11.2: copias de solicitudes caducadas (se pueden volver a marcar) y aviso del modo de borrado (INFORME/ACTIVO).
     v1.11: el panel indica en que carpetas recoge el vigilante las solicitudes (config_plataforma.csv; por defecto la
            carpeta Descargas del navegador, la raiz documental y la carpeta de entrada).
     v1.10.3: textos del original contenidos en su columna (sin solaparse con las copias) y huella SHA-256
@@ -14,12 +15,16 @@ param([string]$Raiz = (Split-Path $PSScriptRoot -Parent), [int]$PresupuestoSeg =
 $ErrorActionPreference = 'Stop'
 # --- v1.11: configuracion de la plataforma (config_plataforma.csv junto a los scripts) ---
 function Get-ConfigPlataforma([string]$dir) {
-  $c = [ordered]@{ RaizDocumental = ''; CarpetaEntrada = 'INPUT'; CarpetaSolicitudes = '%DESCARGAS_NAVEGADOR%' }
+  $c = [ordered]@{ RaizDocumental = ''; CarpetaEntrada = 'INPUT'; CarpetaSolicitudes = '%DESCARGAS_NAVEGADOR%'; IntervaloVigilanteMin = '60'; CaducidadSolicitudHoras = '24'; ModoBorrados = 'INFORME' }
   $p = Join-Path $dir 'config_plataforma.csv'
   if (Test-Path -LiteralPath $p) {
     try { foreach ($f in @(Import-Csv -LiteralPath $p -Delimiter ';' -Encoding UTF8)) {
         $k = "$($f.Clave)".Trim(); if ($k -and $c.Contains($k)) { $c[$k] = "$($f.Valor)".Trim() } } } catch { } }
   if (-not $c.CarpetaEntrada -or $c.CarpetaEntrada -match '[\\/:*?"<>|]' -or $c.CarpetaEntrada -match '^(\.|_|\d\d_)') { $c.CarpetaEntrada = 'INPUT' }
+  # v1.11.2: valores numericos y modo de borrado validados; ante cualquier duda, el modo seguro (INFORME)
+  $n = 0; if (-not [int]::TryParse("$($c.IntervaloVigilanteMin)", [ref]$n) -or $n -lt 10 -or $n -gt 240) { $c.IntervaloVigilanteMin = '60' }
+  $n = 0; if (-not [int]::TryParse("$($c.CaducidadSolicitudHoras)", [ref]$n) -or $n -lt 1 -or $n -gt 720) { $c.CaducidadSolicitudHoras = '24' }
+  if ("$($c.ModoBorrados)" -ine 'ACTIVO') { $c.ModoBorrados = 'INFORME' } else { $c.ModoBorrados = 'ACTIVO' }
   return $c }
 function Get-CarpetaDescargasNavegador {
   # Carpeta "Descargas" de Windows (la que usan por defecto Edge, Chrome y Firefox); admite redireccion a otro disco.
@@ -93,7 +98,14 @@ foreach ($mes in @((Get-Date).AddMonths(-1), (Get-Date))) {
       $r = $l.Origen; if ($r.StartsWith($Raiz, [StringComparison]::OrdinalIgnoreCase)) { $r = Rel $r }
       $borr.Add([ordered]@{ f = $l.Fecha.Replace('T', ' '); r = $r; e = $l.Estado }) } } } }
 $borrados = @($borr | Select-Object -Last 300); [array]::Reverse($borrados)
-$datos = [ordered]@{ iso = (Get-Date -Format 's'); generado = (Get-Date -Format 'dd/MM/yyyy HH:mm'); incompleto = $cortado; recogida = @(@(Resolve-CarpetasSolicitudes (Get-ConfigPlataforma $org).CarpetaSolicitudes) + @($Raiz)); grupos = @($grupos.Values); borrados = $borrados }
+# v1.11.2: copias de solicitudes caducadas (pendientes_confirmacion) que no figuran en ninguna solicitud vigente ni ejecutada
+$cfgPl = Get-ConfigPlataforma $org; $solD = Join-Path $org 'borrados_solicitudes'; $caduc = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+$pcDir = Join-Path $solD 'pendientes_confirmacion'
+if (Test-Path -LiteralPath $pcDir) {
+  foreach ($fc in @(Get-ChildItem -LiteralPath $pcDir -File -Filter 'SOLICITUD_BORRADO_DUPLICADOS_*.csv')) { try { foreach ($x in (Import-Csv -LiteralPath $fc.FullName -Delimiter ';' -Encoding UTF8)) { if ($x.RutaDuplicado) { [void]$caduc.Add($x.RutaDuplicado.TrimStart('\')) } } } catch { } }
+  foreach ($fv in @(Get-ChildItem -LiteralPath $solD -File -Filter '*.csv' -ErrorAction SilentlyContinue) + @(Get-ChildItem -LiteralPath (Join-Path $solD 'procesadas') -File -Filter 'resultado_*.csv' -ErrorAction SilentlyContinue)) {
+    try { foreach ($x in (Import-Csv -LiteralPath $fv.FullName -Delimiter ';' -Encoding UTF8)) { if ($x.RutaDuplicado) { [void]$caduc.Remove($x.RutaDuplicado.TrimStart('\')) } } } catch { } } }
+$datos = [ordered]@{ iso = (Get-Date -Format 's'); generado = (Get-Date -Format 'dd/MM/yyyy HH:mm'); incompleto = $cortado; recogida = @(@(Resolve-CarpetasSolicitudes $cfgPl.CarpetaSolicitudes) + @($Raiz)); modoBorrados = $cfgPl.ModoBorrados; caducidadHoras = [int]$cfgPl.CaducidadSolicitudHoras; caducadas = @($caduc); grupos = @($grupos.Values); borrados = $borrados }
 $json = ($datos | ConvertTo-Json -Depth 6 -Compress) -replace '</', '<\/'
 $plantilla = @'
 <!doctype html>
@@ -292,11 +304,12 @@ details.historial td{padding:6px 8px;border-bottom:1px solid var(--linea);word-b
   var POR_PAGINA = 40, pagina = 1;
   var marcadas = new Map();          // ruta copia -> {grupo, copia}
   var CLAVE = 'panelDuplicados.solicitadas';
-  var solicitadas = {};
+  var solicitadas = {}, caducadas = {};
   try { solicitadas = JSON.parse(localStorage.getItem(CLAVE) || '{}') || {}; } catch(e) { solicitadas = {}; }
   // las que ya no existen en el panel se olvidan
   (function(){ var vivas = {}; G.forEach(function(g){ g.c.forEach(function(c){ vivas[c.r] = 1; }); });
     Object.keys(solicitadas).forEach(function(k){ if(!vivas[k]) delete solicitadas[k]; });
+    (D.caducadas || []).forEach(function(k){ delete solicitadas[k]; caducadas[k] = 1; });   // v1.11.2: caducadas, se pueden volver a marcar
     try { localStorage.setItem(CLAVE, JSON.stringify(solicitadas)); } catch(e) {} })();
 
   var IMG = /\.(jpe?g|png|gif|webp|bmp|svg)$/i, VID = /\.(mp4|webm|mov|m4v)$/i, PDF = /\.pdf$/i;
@@ -319,6 +332,7 @@ details.historial td{padding:6px 8px;border-bottom:1px solid var(--linea);word-b
   function procede(c){ return c.v === 'SHA' || c.v === 'ZIP' || c.v === 'TAM'; }
   function estadoCopia(c){
     if (solicitadas[c.r]) return ['sol','Solicitado '+solicitadas[c.r],'Solicitud de borrado creada; el vigilante la ejecuta en su siguiente pasada'];
+    if (caducadas[c.r] && procede(c)) return ['ver','Solicitud caducada: márquela de nuevo','La solicitud anterior superó el plazo de '+(D.caducidadHoras||24)+' h sin ejecutarse y no se borró. Si sigue queriendo borrar esta copia, vuelva a marcarla.'];
     if (c.v === 'SHA') return ['ok','Idéntica','Mismo SHA-256 que el original'];
     if (c.v === 'ZIP') return ['ok','Mismo contenido','ZIP con los mismos archivos que el original; se comprueba de nuevo al borrar'];
     if (c.v === 'TAM') return ['ver','Se verifica al borrar','Mismo tamaño que el original; el vigilante compara el contenido completo antes de borrar y no borra si difiere'];
@@ -342,6 +356,7 @@ details.historial td{padding:6px 8px;border-bottom:1px solid var(--linea);word-b
   if (D.sinDatos) { document.getElementById('nota').textContent = 'Falta la carpeta _panel junto a este archivo o todavía no se ha generado. El vigilante la crea en su siguiente pasada.'; }
   else document.getElementById('nota').textContent = 'Generado el ' + D.generado + '. A la izquierda está el documento que se conserva, en su carpeta clasificada; a la derecha, sus copias en _DUPLICADOS_REVISAR. '
     + (nCopias - nProc ? (nCopias - nProc === 1 ? '1 copia no se puede borrar porque su original no está localizado o no coincide; revísela a mano.' : num(nCopias - nProc) + ' copias no se pueden borrar porque su original no está localizado o no coincide; revíselas a mano.') : 'Todas las copias tienen su original localizado.')
+    + (D.modoBorrados === 'INFORME' ? ' Borrados en modo INFORME: las solicitudes se verifican y se informa de lo que se borraría, pero no se borra nada hasta que usted lo autorice.' : '')
     + (D.incompleto ? ' La lista está incompleta: el recorrido superó el tiempo máximo y se completará en la próxima actualización.' : '');
 
   // ---- filtros

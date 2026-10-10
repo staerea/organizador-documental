@@ -27,3 +27,7 @@ for f in os.listdir(os.path.join(R0,'config')):
     shutil.copy(os.path.join(R0,'config',f),os.path.join(B,f))
 for f in ['Deshacer.ps1','Desinstalar_Vigilante.ps1','REANUDAR_VIGILANTE.bat']:
     shutil.copy(os.path.join(D,f),os.path.join(B,f))
+
+# v1.11.2: lanzador sin ventana (VBScript: ASCII, CRLF y SIN BOM, o wscript no lo interpreta)
+v=open(os.path.join(D,'Vigilante_Oculto.vbs'),encoding='utf-8').read(); v.encode('ascii')
+open(os.path.join(B,'Vigilante_Oculto.vbs'),'wb').write(v.replace('\r\n','\n').replace('\n','\r\n').encode('ascii'))

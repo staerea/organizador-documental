@@ -2,6 +2,19 @@
 
 Formato: [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/); versiones `MAYOR.MENOR.PARCHE`.
 
+## [1.11.2] — 2026-10-10
+### Seguridad (incidencia del 10‑10‑2026: seis solicitudes antiguas ejecutadas al desplegar la v1.11.1 sin confirmación expresa)
+- **Caducidad de solicitudes de borrado** (`CaducidadSolicitudHoras`, 24 h): una solicitud no iniciada más antigua, o sin fecha válida, pasa a `borrados_solicitudes\pendientes_confirmacion` (latido `SOLICITUDES_CADUCADAS`) y el panel permite volver a marcar esas copias.
+- **Modo de borrado** (`ModoBorrados`): `INFORME` por defecto (verifica y escribe `informe_<solicitud>.csv` con `SE_BORRARIA`, latido `BORRADOS_SOLO_INFORME`, sin borrar) o `ACTIVO`. Valor ausente o no válido = `INFORME`. Todo despliegue se hace en `INFORME`.
+- Puerta de despliegue y regla de comunicación en `docs/GOBERNANZA.md` y en el skill.
+### Cambiado
+- **Periodicidad del vigilante configurable** (`IntervaloVigilanteMin`, 60 min por defecto; antes 10). Límite por pasada 55 min y presupuestos ampliados: RAÍZ 25 min, BORRADOS 10 min, planes nuevos hasta el min 30, panel hasta el min 45, bloqueo huérfano a los 65 min.
+- **Ejecución sin ventana:** la tarea lanza `wscript.exe` con `Vigilante_Oculto.vbs` (PowerShell oculto desde el inicio); retorno automático al método anterior si VBScript no está disponible.
+- M16: la ventana de cambios masivos es el intervalo del vigilante (antes 10 min fijos).
+- `CONFIGURAR_PLATAFORMA.bat`: intervalo (vuelve a registrar la tarea), caducidad y modo de borrado (ACTIVO exige escribir «SI»).
+- Tarea horaria: «VIGILANTE DETENIDO» si no hay `FIN_OK` en 1,5 intervalos; informa de solicitudes caducadas, del modo INFORME y de los `informe_*.csv`.
+- Pruebas: `prueba10.ps1` (19 casos); total 139.
+
 ## [1.11.1] — 2026-10-10
 ### Corregido
 - **Incidencia 07‑10‑2026:** un acceso directo de Google Docs (`.gdoc`) en la raíz no se podía leer (`Get-FileHash`: «Función incorrecta») y su error abortaba la pasada completa. Desde el 07‑10 a las 14:43 todas las pasadas terminaron en `FIN_ERROR`: la raíz acumuló unos 200 elementos y no se aplicó ningún plan durante tres días. Ahora cada elemento de la fase RAÍZ se procesa en su propio bloque de errores (`ERROR_ELEMENTO` en el registro, latido `RAIZ_ELEMENTOS_CON_ERROR`) y la pasada continúa.

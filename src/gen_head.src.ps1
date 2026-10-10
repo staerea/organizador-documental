@@ -1,8 +1,9 @@
-<#  PANEL DE DUPLICADOS (organizador-documental v1.11).
+<#  PANEL DE DUPLICADOS (organizador-documental v1.11.2).
     Genera _DUPLICADOS_REVISAR\PANEL_DUPLICADOS.html: un registro por grupo (documento clasificado que se conserva + todas sus
     copias en _DUPLICADOS_REVISAR), con miniaturas, ubicacion, estado de verificacion y marcado para borrar.
     El panel NO borra: crea SOLICITUD_BORRADO_DUPLICADOS_<fecha>.csv, que el vigilante verifica (SHA-256 o huella ZIP,
     original presente fuera de _DUPLICADOS_REVISAR) y ejecuta. Este script solo lee y escribe el propio panel.
+    v1.11.2: copias de solicitudes caducadas (se pueden volver a marcar) y aviso del modo de borrado (INFORME/ACTIVO).
     v1.11: el panel indica en que carpetas recoge el vigilante las solicitudes (config_plataforma.csv; por defecto la
            carpeta Descargas del navegador, la raiz documental y la carpeta de entrada).
     v1.10.3: textos del original contenidos en su columna (sin solaparse con las copias) y huella SHA-256
@@ -69,6 +70,13 @@ foreach ($mes in @((Get-Date).AddMonths(-1), (Get-Date))) {
       $r = $l.Origen; if ($r.StartsWith($Raiz, [StringComparison]::OrdinalIgnoreCase)) { $r = Rel $r }
       $borr.Add([ordered]@{ f = $l.Fecha.Replace('T', ' '); r = $r; e = $l.Estado }) } } } }
 $borrados = @($borr | Select-Object -Last 300); [array]::Reverse($borrados)
-$datos = [ordered]@{ iso = (Get-Date -Format 's'); generado = (Get-Date -Format 'dd/MM/yyyy HH:mm'); incompleto = $cortado; recogida = @(@(Resolve-CarpetasSolicitudes (Get-ConfigPlataforma $org).CarpetaSolicitudes) + @($Raiz)); grupos = @($grupos.Values); borrados = $borrados }
+# v1.11.2: copias de solicitudes caducadas (pendientes_confirmacion) que no figuran en ninguna solicitud vigente ni ejecutada
+$cfgPl = Get-ConfigPlataforma $org; $solD = Join-Path $org 'borrados_solicitudes'; $caduc = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+$pcDir = Join-Path $solD 'pendientes_confirmacion'
+if (Test-Path -LiteralPath $pcDir) {
+  foreach ($fc in @(Get-ChildItem -LiteralPath $pcDir -File -Filter 'SOLICITUD_BORRADO_DUPLICADOS_*.csv')) { try { foreach ($x in (Import-Csv -LiteralPath $fc.FullName -Delimiter ';' -Encoding UTF8)) { if ($x.RutaDuplicado) { [void]$caduc.Add($x.RutaDuplicado.TrimStart('\')) } } } catch { } }
+  foreach ($fv in @(Get-ChildItem -LiteralPath $solD -File -Filter '*.csv' -ErrorAction SilentlyContinue) + @(Get-ChildItem -LiteralPath (Join-Path $solD 'procesadas') -File -Filter 'resultado_*.csv' -ErrorAction SilentlyContinue)) {
+    try { foreach ($x in (Import-Csv -LiteralPath $fv.FullName -Delimiter ';' -Encoding UTF8)) { if ($x.RutaDuplicado) { [void]$caduc.Remove($x.RutaDuplicado.TrimStart('\')) } } } catch { } } }
+$datos = [ordered]@{ iso = (Get-Date -Format 's'); generado = (Get-Date -Format 'dd/MM/yyyy HH:mm'); incompleto = $cortado; recogida = @(@(Resolve-CarpetasSolicitudes $cfgPl.CarpetaSolicitudes) + @($Raiz)); modoBorrados = $cfgPl.ModoBorrados; caducidadHoras = [int]$cfgPl.CaducidadSolicitudHoras; caducadas = @($caduc); grupos = @($grupos.Values); borrados = $borrados }
 $json = ($datos | ConvertTo-Json -Depth 6 -Compress) -replace '</', '<\/'
 $plantilla = @'

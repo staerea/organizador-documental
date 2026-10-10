@@ -13,12 +13,16 @@ param([Parameter(Mandatory=$true)][string]$Plan, [string]$Raiz = (Split-Path $PS
 $ErrorActionPreference = 'Stop'
 # --- v1.11: configuracion de la plataforma (config_plataforma.csv junto a los scripts) ---
 function Get-ConfigPlataforma([string]$dir) {
-  $c = [ordered]@{ RaizDocumental = ''; CarpetaEntrada = 'INPUT'; CarpetaSolicitudes = '%DESCARGAS_NAVEGADOR%' }
+  $c = [ordered]@{ RaizDocumental = ''; CarpetaEntrada = 'INPUT'; CarpetaSolicitudes = '%DESCARGAS_NAVEGADOR%'; IntervaloVigilanteMin = '60'; CaducidadSolicitudHoras = '24'; ModoBorrados = 'INFORME' }
   $p = Join-Path $dir 'config_plataforma.csv'
   if (Test-Path -LiteralPath $p) {
     try { foreach ($f in @(Import-Csv -LiteralPath $p -Delimiter ';' -Encoding UTF8)) {
         $k = "$($f.Clave)".Trim(); if ($k -and $c.Contains($k)) { $c[$k] = "$($f.Valor)".Trim() } } } catch { } }
   if (-not $c.CarpetaEntrada -or $c.CarpetaEntrada -match '[\\/:*?"<>|]' -or $c.CarpetaEntrada -match '^(\.|_|\d\d_)') { $c.CarpetaEntrada = 'INPUT' }
+  # v1.11.2: valores numericos y modo de borrado validados; ante cualquier duda, el modo seguro (INFORME)
+  $n = 0; if (-not [int]::TryParse("$($c.IntervaloVigilanteMin)", [ref]$n) -or $n -lt 10 -or $n -gt 240) { $c.IntervaloVigilanteMin = '60' }
+  $n = 0; if (-not [int]::TryParse("$($c.CaducidadSolicitudHoras)", [ref]$n) -or $n -lt 1 -or $n -gt 720) { $c.CaducidadSolicitudHoras = '24' }
+  if ("$($c.ModoBorrados)" -ine 'ACTIVO') { $c.ModoBorrados = 'INFORME' } else { $c.ModoBorrados = 'ACTIVO' }
   return $c }
 function Get-CarpetaDescargasNavegador {
   # Carpeta "Descargas" de Windows (la que usan por defecto Edge, Chrome y Firefox); admite redireccion a otro disco.

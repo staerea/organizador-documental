@@ -18,20 +18,27 @@
        Si cambia el nombre de la entrada, la carpeta anterior se traslada sola (registro ENTRADA_MIGRADA) y los planes que aun
        citen el nombre antiguo se siguen aplicando. Una solicitud ya procesada que reaparece se archiva sin repetirla.
        Una vez al dia lanza la copia verificada (M15) si esta activa y su destino esta disponible.
+    8) (v1.11.2) Caducidad de solicitudes (CaducidadSolicitudHoras, 24 h): una solicitud no iniciada mas antigua, o sin fecha,
+       no se ejecuta y pasa a borrados_solicitudes\pendientes_confirmacion. ModoBorrados=INFORME (por defecto) verifica y
+       escribe informe_<solicitud>.csv sin borrar; solo ACTIVO borra. Intervalo por defecto 60 min, lanzado sin ventana.
     UNICA excepcion a "nunca borra": a peticion expresa del usuario (solicitud del panel) borra copias que esten DENTRO de
     _DUPLICADOS_REVISAR, solo si su original sigue fuera de esa carpeta y el contenido es identico (SHA-256, o huella ZIP);
     en Google Drive el borrado va a la papelera (30 dias). Cada decision queda en el registro, el resultado y el manifiesto.
     Fuera de ese caso, NUNCA borra nada. Todo queda en _ORGANIZACION\vigilante_<AAAAMM>.csv y en el manifiesto.   #>
-param([string]$Raiz = '', [string]$Entrada = '', [int]$EsperaSeg = 120, [int]$HuerfanoMin = 35, [int]$PresupuestoM16Seg = 120, [int]$PresupuestoRaizMin = 15, [int]$PresupuestoConciliarSeg = 180, [int]$PresupuestoBorradoMin = 6, [int]$PanelMaxSeg = 300)
+param([string]$Raiz = '', [string]$Entrada = '', [int]$EsperaSeg = 120, [int]$HuerfanoMin = 65, [int]$PresupuestoM16Seg = 120, [int]$PresupuestoRaizMin = 25, [int]$PresupuestoConciliarSeg = 180, [int]$PresupuestoBorradoMin = 10, [int]$PanelMaxSeg = 300, [int]$PlanesHastaMin = 30, [int]$PanelHastaMin = 45)
 $ErrorActionPreference = 'Stop'
 # --- v1.11: configuracion de la plataforma (config_plataforma.csv junto a los scripts) ---
 function Get-ConfigPlataforma([string]$dir) {
-  $c = [ordered]@{ RaizDocumental = ''; CarpetaEntrada = 'INPUT'; CarpetaSolicitudes = '%DESCARGAS_NAVEGADOR%' }
+  $c = [ordered]@{ RaizDocumental = ''; CarpetaEntrada = 'INPUT'; CarpetaSolicitudes = '%DESCARGAS_NAVEGADOR%'; IntervaloVigilanteMin = '60'; CaducidadSolicitudHoras = '24'; ModoBorrados = 'INFORME' }
   $p = Join-Path $dir 'config_plataforma.csv'
   if (Test-Path -LiteralPath $p) {
     try { foreach ($f in @(Import-Csv -LiteralPath $p -Delimiter ';' -Encoding UTF8)) {
         $k = "$($f.Clave)".Trim(); if ($k -and $c.Contains($k)) { $c[$k] = "$($f.Valor)".Trim() } } } catch { } }
   if (-not $c.CarpetaEntrada -or $c.CarpetaEntrada -match '[\\/:*?"<>|]' -or $c.CarpetaEntrada -match '^(\.|_|\d\d_)') { $c.CarpetaEntrada = 'INPUT' }
+  # v1.11.2: valores numericos y modo de borrado validados; ante cualquier duda, el modo seguro (INFORME)
+  $n = 0; if (-not [int]::TryParse("$($c.IntervaloVigilanteMin)", [ref]$n) -or $n -lt 10 -or $n -gt 240) { $c.IntervaloVigilanteMin = '60' }
+  $n = 0; if (-not [int]::TryParse("$($c.CaducidadSolicitudHoras)", [ref]$n) -or $n -lt 1 -or $n -gt 720) { $c.CaducidadSolicitudHoras = '24' }
+  if ("$($c.ModoBorrados)" -ine 'ACTIVO') { $c.ModoBorrados = 'INFORME' } else { $c.ModoBorrados = 'ACTIVO' }
   return $c }
 function Get-CarpetaDescargasNavegador {
   # Carpeta "Descargas" de Windows (la que usan por defecto Edge, Chrome y Firefox); admite redireccion a otro disco.
@@ -214,8 +221,21 @@ try {
     $dst = Libre $solDir $s.Name $false; Move-Item -LiteralPath $s.FullName -Destination $dst; Log $s.FullName $dst 'SOLICITUD_BORRADO_RECIBIDA' }
   if (Test-Path -LiteralPath $solDir) {
     $rb = [Diagnostics.Stopwatch]::StartNew(); $sha256 = [Security.Cryptography.SHA256]::Create()
+    $simular = ($cfgP.ModoBorrados -ne 'ACTIVO'); $cadH = [int]$cfgP.CaducidadSolicitudHoras; $nCad = 0; $nInf = 0
+    $pendConf = Join-Path $solDir 'pendientes_confirmacion'
     foreach ($s in @(Get-ChildItem -LiteralPath $solDir -File | Where-Object { $_.Name -match $rxSol } | Sort-Object Name)) {
-      $resPath = Join-Path $solDir ('resultado_' + $s.Name); $hechas = @{}
+      # v1.11.2: una solicitud que no se ha empezado a ejecutar y tiene mas de CaducidadSolicitudHoras desde que se creo en el
+      #          panel NO se ejecuta: pasa a pendientes_confirmacion y el usuario debe volver a marcarla (incidencia 10-10-2026).
+      if (-not (Test-Path -LiteralPath (Join-Path $solDir ('resultado_' + $s.Name)))) {
+        $creada = $null
+        try { $f0 = @(Import-Csv -LiteralPath $s.FullName -Delimiter ';' -Encoding UTF8 | Select-Object -First 1)
+              if ($f0.Count -and $f0[0].Solicitado) { $creada = [datetime]::Parse($f0[0].Solicitado, [Globalization.CultureInfo]::InvariantCulture, ([Globalization.DateTimeStyles]::AssumeUniversal -bor [Globalization.DateTimeStyles]::AdjustToUniversal)) } } catch { $creada = $null }
+        if (-not $creada -or ((Get-Date).ToUniversalTime() - $creada).TotalHours -gt $cadH) {
+          if (-not (Test-Path -LiteralPath $pendConf)) { New-Item -ItemType Directory -Path $pendConf | Out-Null }
+          $dst = Libre $pendConf $s.Name $false; Move-Item -LiteralPath $s.FullName -Destination $dst
+          Log $s.FullName $dst ('SOLICITUD_CADUCADA: creada ' + $(if ($creada) { $creada.ToString('s') + 'Z' } else { 'sin fecha valida' }) + '; no se ejecuta sin nueva confirmacion'); $nCad++; continue } }
+      # v1.11.2: en modo INFORME (por defecto tras cada despliegue) se verifica todo pero no se borra nada
+      $resPath = Join-Path $solDir ($(if ($simular) { 'informe_' } else { 'resultado_' }) + $s.Name); $hechas = @{}
       if (Test-Path -LiteralPath $resPath) { foreach ($x in (Import-Csv -LiteralPath $resPath -Delimiter ';' -Encoding UTF8)) { $hechas[$x.RutaDuplicado] = 1 } }
       $filas = @(); try { $filas = @(Import-Csv -LiteralPath $s.FullName -Delimiter ';' -Encoding UTF8) } catch { Log $s.FullName '' ('SOLICITUD_ILEGIBLE: ' + $_.Exception.Message) }
       $completa = $true
@@ -238,22 +258,26 @@ try {
             if (-not $igual) { $est = 'NO_BORRADO_CONTENIDO_DISTINTO'; $mot = 'el contenido no coincide con el original: se conserva la copia' }
             else {
               $shaD = (Get-FileHash -LiteralPath $pd -Algorithm SHA256).Hash.ToLower(); $tamD = $fd.Length; $fmD = [int64]($fd.LastWriteTimeUtc-[datetime]'1970-01-01').TotalMilliseconds
+              if ($simular) { $est = 'SE_BORRARIA'; $mot = 'identico a ' + $o + ' (modo INFORME: no se ha borrado)' }
+              else {
               Remove-Item -LiteralPath $pd   # en Google Drive para escritorio va a la papelera de Drive (30 dias)
               ManAdd ([pscustomobject]@{ RutaRelativa=$d; SHA256=$shaD; Tamano=$tamD; FechaMod=$fmD; Area='_DUPLICADOS_REVISAR'; Estado='BORRADO_POR_USUARIO';
-                NombreOriginal=$o; FechaClasificacion=(Get-Date -Format 'yyyy-MM-dd'); VersionSkill='1.11' })
-              $est = 'BORRADO_VERIFICADO'; $mot = 'identico a ' + $o }
+                NombreOriginal=$o; FechaClasificacion=(Get-Date -Format 'yyyy-MM-dd'); VersionSkill='1.11.2' })
+              $est = 'BORRADO_VERIFICADO'; $mot = 'identico a ' + $o } }
           } catch { $est = 'NO_BORRADO_ERROR'; $mot = $_.Exception.Message } }
-        if ($est -eq 'BORRADO_VERIFICADO') { $nBorr++ } else { $nRech++ }
+        if ($est -eq 'BORRADO_VERIFICADO') { $nBorr++ } elseif ($est -eq 'SE_BORRARIA') { $nInf++ } else { $nRech++ }
         [pscustomobject]@{ Fecha=(Get-Date -Format s); RutaDuplicado=$d; RutaOriginal=$o; Estado=$est; Motivo=$mot; SHA256=$shaD } |
           Export-Csv -LiteralPath $resPath -Delimiter ';' -NoTypeInformation -Encoding UTF8 -Append
         Log $(if ($d) { Abs $d } else { '' }) $(if ($o) { Abs $o } else { '' }) $est
       }
+      if ($simular) { if (-not $completa) { Latido 'BORRADOS_APLAZADOS' ("limite de {0} min; el informe de {1} sigue en la proxima pasada" -f $PresupuestoBorradoMin, $s.Name); break }; continue }   # la solicitud queda a la espera de ModoBorrados=ACTIVO
       if ($completa) { if (-not (Test-Path -LiteralPath $solHechas)) { New-Item -ItemType Directory -Path $solHechas | Out-Null }
         Move-Item -LiteralPath $s.FullName -Destination (Libre $solHechas $s.Name $false)
         if (Test-Path -LiteralPath $resPath) { Move-Item -LiteralPath $resPath -Destination (Libre $solHechas ('resultado_' + $s.Name) $false) } }
       else { Latido 'BORRADOS_APLAZADOS' ("limite de {0} min; la solicitud {1} sigue en la proxima pasada" -f $PresupuestoBorradoMin, $s.Name); break }
     }
-    if ($nBorr -or $nRech) { Latido 'BORRADOS' ("borrados={0} no_borrados={1}" -f $nBorr, $nRech) }
+    if ($nBorr -or $nRech -or $nInf) { Latido $(if ($simular) { 'BORRADOS_SOLO_INFORME' } else { 'BORRADOS' }) ("borrados={0} se_borrarian={1} no_borrados={2}" -f $nBorr, $nInf, $nRech) }
+    if ($nCad) { Latido 'SOLICITUDES_CADUCADAS' ("{0} solicitudes con mas de {1} h no se ejecutan: estan en borrados_solicitudes\pendientes_confirmacion; vuelva a marcarlas en el panel si siguen siendo validas" -f $nCad, $cadH) }
   }
   Fase 'RAIZ'
   $nMov = 0; $nPend = 0; $nDupRaiz = 0; $nErrEl = 0
@@ -292,7 +316,7 @@ try {
   if (Test-Path -LiteralPath $pend) {
     foreach ($p in @(Get-ChildItem -LiteralPath $pend -Filter 'plan_*.csv' -File | Sort-Object Name)) {
       if (-not (Estable $p)) { continue }
-      if ($nPlan -ge 1 -and ((Get-Date) - $t0).TotalMinutes -ge 12) { Latido 'PLANES_APLAZADOS' 'limite de 12 min por pasada; siguen en la proxima'; break }   # v1.9.1: por bloques, sin rozar el corte de 30 min
+      if ($nPlan -ge 1 -and ((Get-Date) - $t0).TotalMinutes -ge $PlanesHastaMin) { Latido 'PLANES_APLAZADOS' ("limite de {0} min por pasada; siguen en la proxima" -f $PlanesHastaMin); break }   # v1.9.1: por bloques, sin rozar el corte de 30 min
       if (-not (Test-Path -LiteralPath $apl)) { New-Item -ItemType Directory -Path $apl | Out-Null }
       try { & (Join-Path $org 'Aplicar_Plan.ps1') -Plan $p.FullName -Raiz $Raiz -Ejecutar | Out-Null; $st = 'PLAN_APLICADO' } catch { $st = 'PLAN_ERROR: ' + $_.Exception.Message }
       Move-Item -LiteralPath $p.FullName -Destination (Libre $apl $p.Name $false); Log $p.FullName '' $st; $nPlan++ }
@@ -303,7 +327,7 @@ try {
   if (Test-Path -LiteralPath $genP) {
     $toca = ($nDupRaiz + $nBorr + $nRech + $nConc + $nPlan) -gt 0 -or -not (Test-Path -LiteralPath $panel)
     if (-not $toca) { $toca = ((Get-Date) - (Get-Item -LiteralPath $panel).LastWriteTime).TotalMinutes -ge 60 }
-    if ($toca -and ((Get-Date) - $t0).TotalMinutes -lt 24) {
+    if ($toca -and ((Get-Date) - $t0).TotalMinutes -lt $PanelHastaMin) {
       # v1.10.2: en un proceso aparte con tiempo maximo, para que un panel bloqueado no cuelgue la pasada (06-10-2026 11:12)
       try {
         $exe = (Get-Process -Id $PID).Path; $estP = Join-Path $org 'panel_ultimo.json'
@@ -315,7 +339,7 @@ try {
           if ($rp -and $rp.Ranura) { Latido 'PANEL_ACTUALIZADO' ("grupos={0} copias={1} incompleto={2} ranura={3} html={4}" -f $rp.Grupos, $rp.Copias, $rp.Incompleto, $rp.Ranura, $rp.Html) }
           else { Log '' '' ('PANEL_ERROR: el generador termino sin escribir datos' + $(if ($rp) { ' (' + $rp.Fallos + ')' } else { '' })) } } }
       catch { Log '' '' ('PANEL_ERROR: ' + $_.Exception.Message) } } }
-  try { [ordered]@{ version = '1.11.1'; ultimaPasada = (Get-Date -Format s); raiz = $Raiz; entrada = $Entrada; carpetasSolicitudes = @($carpetasSol); movidos = $nMov; planes = $nPlan; borrados = $nBorr } |
+  try { [ordered]@{ version = '1.11.2'; modoBorrados = $cfgP.ModoBorrados; intervaloMin = [int]$cfgP.IntervaloVigilanteMin; ultimaPasada = (Get-Date -Format s); raiz = $Raiz; entrada = $Entrada; carpetasSolicitudes = @($carpetasSol); movidos = $nMov; planes = $nPlan; borrados = $nBorr } |
         ConvertTo-Json | Set-Content -LiteralPath (Join-Path $org 'estado_plataforma.json') -Encoding UTF8 } catch { }
   Fase 'FIN'; Latido 'FIN_OK' ("movidos={0} planes={1} raiz_pendientes={2} conciliados={3} borrados={4}" -f $nMov, $nPlan, $nPend, $nConc, $nBorr)
 } catch { Log '' '' ('ERROR: ' + $_.Exception.Message); Latido 'FIN_ERROR' $_.Exception.Message }

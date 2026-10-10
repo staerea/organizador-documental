@@ -2,3 +2,6 @@
 RaizDocumental;G:\Mi unidad\DESCARGAS;Carpeta raiz que organiza el vigilante
 CarpetaEntrada;INPUT;Bandeja de entrada dentro de la raiz
 CarpetaSolicitudes;%DESCARGAS_NAVEGADOR%;Carpetas donde se recogen los CSV del panel (separadas por | - %DESCARGAS_NAVEGADOR% = Descargas de Windows)
+IntervaloVigilanteMin;60;Minutos entre pasadas del vigilante (10-240)
+CaducidadSolicitudHoras;24;Horas tras las que una solicitud de borrado no ejecutada caduca y requiere nueva confirmacion (1-720)
+ModoBorrados;INFORME;INFORME = verifica sin borrar (por defecto tras cada despliegue); ACTIVO = ejecuta los borrados solicitados

@@ -4,7 +4,7 @@
 
 | Requisito | Por qué | Síntoma si falta |
 |---|---|---|
-| Equipo encendido (no suspendido) y sesión de Windows iniciada | La tarea del vigilante es del usuario | Sin filas nuevas en el latido; la tarea horaria avisa «VIGILANTE DETENIDO» |
+| Equipo encendido (no suspendido) y sesión de Windows iniciada | La tarea del vigilante es del usuario (cada `IntervaloVigilanteMin`, 60 min por defecto, sin ventana) | Sin filas nuevas en el latido durante más de 1,5 intervalos; la tarea horaria avisa «VIGILANTE DETENIDO» |
 | Google Drive para escritorio abierto (unidad `G:` montada) | La raíz está en `G:` | `vigilante_sin_raiz.txt`; la tarea horaria avisa «RAÍZ NO DISPONIBLE» |
 | App de escritorio de Claude abierta | La tarea horaria accede al equipo a través de ella | La tarea horaria termina sin acceso al equipo |
 
@@ -38,12 +38,19 @@
 | Alerta M16 | `ALERTA_INTEGRIDAD.txt`, `integridad_<AAAAMM>.csv` | Revisar; si es una falsa alarma, ejecutar `REANUDAR_VIGILANTE.bat` |
 | El panel no cambia | `panel_ultimo.json`, latido `PANEL_*` | Recargar con F5; el panel se regenera como máximo cada hora |
 
+## Ejecución sin ventana (v1.11.2)
+
+La tarea de Windows lanza `wscript.exe //B //Nologo Vigilante_Oculto.vbs`. `wscript.exe` no tiene consola y el `.vbs` abre PowerShell con la ventana oculta desde su creación, de modo que no aparece ni parpadea ninguna ventana (con `powershell.exe -WindowStyle Hidden` lanzado directamente por el Programador de tareas, la consola se crea visible y se oculta después: parpadeo). Requisito: VBScript, característica opcional de Windows en retirada progresiva (fase 1, Windows 11 24H2: instalada y activa por defecto; fase 2, hacia 2027: desactivada por defecto). Si `wscript.exe` o el `.vbs` faltan, `Instalar_Vigilante.ps1` vuelve al método anterior y lo indica. Se descartó `conhost.exe --headless`: las reglas de detección Sigma lo tratan como técnica sospechosa y lo marcarían los antivirus/EDR.
+
+Cambiar el intervalo o el modo de lanzamiento requiere volver a registrar la tarea: `INSTALAR_VIGILANTE.bat` (o la opción 4 de `CONFIGURAR_PLATAFORMA.bat`, que lo hace sola).
+
 ## Desplegar una versión
 
+0. **Puerta de despliegue (v1.11.2):** inventariar solicitudes pendientes (carpetas de recogida y `borrados_solicitudes`) y planes en `planes_pendientes`, presentarlos al usuario y obtener su confirmación expresa. Desplegar con `ModoBorrados=INFORME` en `config_plataforma.csv`; pasar a `ACTIVO` solo con autorización expresa tras revisar los `informe_*.csv` de la primera pasada.
 1. Ejecute `python3 tools/build.py` y después `bash tests/run_all.sh`; debe terminar sin fallos.
 2. Copie `dist/*.ps1` a `_ORGANIZACION\`. No sobrescriba los `config_*.csv` del equipo: añada solo las claves nuevas.
 3. Copie `dist/m14/*.py` a `_ORGANIZACION\modulos\M14\`.
-4. Copie `dist/*.bat` a la raíz y `dist/PANEL_DUPLICADOS.html` a `_DUPLICADOS_REVISAR\`.
+4. Copie `dist/*.bat` a la raíz, `dist/Vigilante_Oculto.vbs` a `_ORGANIZACION\` y `dist/PANEL_DUPLICADOS.html` a `_DUPLICADOS_REVISAR\`.
 5. Verifique que el contenido desplegado coincide con `dist/` (SHA‑256).
 6. Revise en la siguiente pasada el latido (`FIN_OK`) y los eventos esperados de la versión.
 7. Actualice el bundle `_ORGANIZACION\repositorio\organizador-documental.bundle` (`git bundle create … --all`).

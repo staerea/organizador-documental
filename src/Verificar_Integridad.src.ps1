@@ -59,7 +59,10 @@ $notaRansom = '^(!?_?readme|how_to_decrypt|how_to_recover|how_to_restore|decrypt
 
 if ($Modo -eq 'Alerta') {
   if (Test-Path -LiteralPath $pausa) { return $true }
-  $lim = (Get-Date).AddMinutes(-10); $lim24 = (Get-Date).AddHours(-24)
+  # v1.11.2: la ventana de cambios masivos es el intervalo del vigilante (60 min por defecto); con 10 min, un cifrado
+  #          ocurrido entre dos pasadas horarias quedaria fuera de la ventana. El umbral (UmbralCambios10min) se mantiene.
+  $ventanaMin = [int](Get-ConfigPlataforma $org).IntervaloVigilanteMin; if ($ventanaMin -lt 10) { $ventanaMin = 10 }
+  $lim = (Get-Date).AddMinutes(-$ventanaMin); $lim24 = (Get-Date).AddHours(-24)
   $umbral = [int]$cfg.UmbralCambios10min
   $cambiados = New-Object System.Collections.Generic.List[string]
   $sospechosos = New-Object System.Collections.Generic.List[string]; $carpetasExt = @{}

@@ -11,12 +11,16 @@ param([string]$Raiz = (Split-Path $PSScriptRoot -Parent), [ValidateSet('Alerta',
 $ErrorActionPreference = 'Stop'
 # --- v1.11: configuracion de la plataforma (config_plataforma.csv junto a los scripts) ---
 function Get-ConfigPlataforma([string]$dir) {
-  $c = [ordered]@{ RaizDocumental = ''; CarpetaEntrada = 'INPUT'; CarpetaSolicitudes = '%DESCARGAS_NAVEGADOR%' }
+  $c = [ordered]@{ RaizDocumental = ''; CarpetaEntrada = 'INPUT'; CarpetaSolicitudes = '%DESCARGAS_NAVEGADOR%'; IntervaloVigilanteMin = '60'; CaducidadSolicitudHoras = '24'; ModoBorrados = 'INFORME' }
   $p = Join-Path $dir 'config_plataforma.csv'
   if (Test-Path -LiteralPath $p) {
     try { foreach ($f in @(Import-Csv -LiteralPath $p -Delimiter ';' -Encoding UTF8)) {
         $k = "$($f.Clave)".Trim(); if ($k -and $c.Contains($k)) { $c[$k] = "$($f.Valor)".Trim() } } } catch { } }
   if (-not $c.CarpetaEntrada -or $c.CarpetaEntrada -match '[\\/:*?"<>|]' -or $c.CarpetaEntrada -match '^(\.|_|\d\d_)') { $c.CarpetaEntrada = 'INPUT' }
+  # v1.11.2: valores numericos y modo de borrado validados; ante cualquier duda, el modo seguro (INFORME)
+  $n = 0; if (-not [int]::TryParse("$($c.IntervaloVigilanteMin)", [ref]$n) -or $n -lt 10 -or $n -gt 240) { $c.IntervaloVigilanteMin = '60' }
+  $n = 0; if (-not [int]::TryParse("$($c.CaducidadSolicitudHoras)", [ref]$n) -or $n -lt 1 -or $n -gt 720) { $c.CaducidadSolicitudHoras = '24' }
+  if ("$($c.ModoBorrados)" -ine 'ACTIVO') { $c.ModoBorrados = 'INFORME' } else { $c.ModoBorrados = 'ACTIVO' }
   return $c }
 function Get-CarpetaDescargasNavegador {
   # Carpeta "Descargas" de Windows (la que usan por defecto Edge, Chrome y Firefox); admite redireccion a otro disco.
@@ -83,7 +87,10 @@ $notaRansom = '^(!?_?readme|how_to_decrypt|how_to_recover|how_to_restore|decrypt
 
 if ($Modo -eq 'Alerta') {
   if (Test-Path -LiteralPath $pausa) { return $true }
-  $lim = (Get-Date).AddMinutes(-10); $lim24 = (Get-Date).AddHours(-24)
+  # v1.11.2: la ventana de cambios masivos es el intervalo del vigilante (60 min por defecto); con 10 min, un cifrado
+  #          ocurrido entre dos pasadas horarias quedaria fuera de la ventana. El umbral (UmbralCambios10min) se mantiene.
+  $ventanaMin = [int](Get-ConfigPlataforma $org).IntervaloVigilanteMin; if ($ventanaMin -lt 10) { $ventanaMin = 10 }
+  $lim = (Get-Date).AddMinutes(-$ventanaMin); $lim24 = (Get-Date).AddHours(-24)
   $umbral = [int]$cfg.UmbralCambios10min
   $cambiados = New-Object System.Collections.Generic.List[string]
   $sospechosos = New-Object System.Collections.Generic.List[string]; $carpetasExt = @{}

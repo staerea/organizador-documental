@@ -18,8 +18,8 @@ T 'T15 bloqueo con proceso vivo se respeta' ((Test-Path "$R/a15.pdf") -and ((Lat
 Reset; Set-Content "$O/vigilante.lock" ("{0}|999999|M16_ALERTA" -f (Get-Date -Format s)); Viejo 5; Suelto 'a16.pdf'; Vig
 T 'T16 bloqueo con proceso muerto se recupera al momento' ((Test-Path "$R/INPUT/a16.pdf") -and ((Lat).Evento -contains 'BLOQUEO_HUERFANO_RECUPERADO'))
 # T17 bloqueo con PID vivo pero 40 min -> se recupera; no se mata un proceso no verificado
-Reset; Set-Content "$O/vigilante.lock" ("{0}|{1}|PLANES" -f (Get-Date -Format s), $PID); Viejo 40; Suelto 'a17.pdf'; Vig
-T 'T17 bloqueo de 40 min se recupera sin matar procesos ajenos' ((Test-Path "$R/INPUT/a17.pdf") -and -not ((Lat).Evento -contains 'PROCESO_COLGADO_DETENIDO'))
+Reset; Set-Content "$O/vigilante.lock" ("{0}|{1}|PLANES" -f (Get-Date -Format s), $PID); Viejo 70; Suelto 'a17.pdf'; Vig
+T 'T17 bloqueo de 70 min (v1.11.2: limite 65) se recupera sin matar procesos ajenos' ((Test-Path "$R/INPUT/a17.pdf") -and -not ((Lat).Evento -contains 'PROCESO_COLGADO_DETENIDO'))
 # T18 presupuesto agotado -> sin alerta y registrado
 Reset; 1..3 | % { Set-Content "$R/01_PROY/A/x$_.pdf.locked" "zz" }; 1..3 | % { Set-Content "$R/02_ADMIN/y$_.docx.encrypted" "zz" }
 $a = [bool](& "$O/Verificar_Integridad.ps1" -Raiz $R -Modo Alerta -PresupuestoSeg 0)

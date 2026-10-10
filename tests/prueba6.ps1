@@ -6,6 +6,7 @@ function Reset {
   foreach ($d in '01_PROY/A','01_PROY/B','02_ADMIN','06_DESARROLLO_SOFTWARE/app','_ORGANIZACION','INPUT') { New-Item -ItemType Directory -Path "$R/$d" -Force | Out-Null }
   Copy-Item "$S/Verificar_Integridad.ps1","$S/Vigilante_Raiz.ps1","$S/Aplicar_Plan.ps1","$S/Generar_Panel_Duplicados.ps1" "$R/_ORGANIZACION/"
   Copy-Item '/mnt/user-data/outputs/org_v16/config_modulos_v16.csv' "$R/_ORGANIZACION/config_modulos.csv"
+  @([pscustomobject]@{ Clave='ModoBorrados'; Valor='ACTIVO'; Descripcion='' }) | Export-Csv "$R/_ORGANIZACION/config_plataforma.csv" -Delimiter ';' -NoTypeInformation -Encoding UTF8   # v1.11.2: por defecto INFORME
   $pdf = [Text.Encoding]::ASCII.GetBytes("%PDF-1.4 contenido ")
   for ($i=0;$i -lt 150;$i++){ [IO.File]::WriteAllBytes("$R/01_PROY/A/doc$i.pdf", $pdf + [byte[]](1..($i+1))) }
   for ($i=0;$i -lt 150;$i++){ Set-Content "$R/01_PROY/B/nota$i.txt" "nota $i" }
@@ -49,7 +50,7 @@ $filas = @(
  @('_DUPLICADOS_REVISAR\..\01_PROY\A\doc8.pdf','01_PROY\A\doc5.pdf','SHA'),
  @('_DUPLICADOS_REVISAR\01_PROY\A\doc5__COPIA_1.pdf','_DUPLICADOS_REVISAR\01_PROY\A\doc5__COPIA_2.pdf','SHA'))
 $csv = "$R/SOLICITUD_BORRADO_DUPLICADOS_20261005_233000.csv"
-$filas | % { [pscustomobject]@{ RutaDuplicado=$_[0]; RutaOriginal=$_[1]; Tipo=$_[2]; Tamano=''; SHA256=''; Solicitado='2026-10-05T23:30:00' } } | Export-Csv $csv -Delimiter ';' -NoTypeInformation -Encoding UTF8
+$filas | % { [pscustomobject]@{ RutaDuplicado=$_[0]; RutaOriginal=$_[1]; Tipo=$_[2]; Tamano=''; SHA256=''; Solicitado=(Get-Date).ToUniversalTime().AddMinutes(-15).ToString('s') } } | Export-Csv $csv -Delimiter ';' -NoTypeInformation -Encoding UTF8
 Viejo $csv
 & "$O/Vigilante_Raiz.ps1" -Raiz $R -PresupuestoBorradoMin 0
 T 'T43 presupuesto 0: la solicitud se recoge pero no se borra nada' ((Test-Path "$O/borrados_solicitudes/SOLICITUD_BORRADO_DUPLICADOS_20261005_233000.csv") -and (Test-Path "$DR/01_PROY/A/doc5__COPIA_1.pdf") -and ((Lat).Evento -contains 'BORRADOS_APLAZADOS'))

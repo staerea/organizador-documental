@@ -2,13 +2,13 @@
 
 Plataforma de gestión documental automatizada para una carpeta raíz sincronizada con Google Drive (por defecto `G:\Mi unidad\DESCARGAS`). Ordena, deduplica por SHA‑256, clasifica por áreas y renombra por contenido lo que llega a la bandeja de entrada (`INPUT`). Todo es reversible y queda registrado. Solo se borran copias redundantes verificadas, y únicamente cuando el usuario lo solicita.
 
-**Versión actual:** 1.11.1 (10‑10‑2026). Historial en [CHANGELOG.md](CHANGELOG.md).
+**Versión actual:** 1.11.2 (10‑10‑2026). Historial en [CHANGELOG.md](CHANGELOG.md).
 
 ## Componentes
 
 | Componente | Dónde se ejecuta | Función |
 |---|---|---|
-| `Vigilante_Raiz.ps1` | Equipo Windows, tarea programada cada 10 min | Lleva lo nuevo de la raíz a `INPUT`, aparta duplicados, aplica planes, atiende solicitudes del panel, comprueba la integridad (M16), lanza la copia (M15) y regenera el panel |
+| `Vigilante_Raiz.ps1` | Equipo Windows, tarea programada cada 60 min (configurable), sin ventana | Lleva lo nuevo de la raíz a `INPUT`, aparta duplicados, aplica planes, atiende solicitudes del panel, comprueba la integridad (M16), lanza la copia (M15) y regenera el panel |
 | `Aplicar_Plan.ps1` | Lo invoca el vigilante | Aplica los planes CSV de clasificación (mover, renombrar, apartar duplicados) con presupuesto de tiempo |
 | `Verificar_Integridad.ps1` | Lo invoca el vigilante | M16: alerta temprana de ransomware y muestra rotatoria de fijeza |
 | `Generar_Panel_Duplicados.ps1` | Lo invoca el vigilante | Panel HTML de `_DUPLICADOS_REVISAR` con marcado para borrado verificado |
@@ -36,7 +36,7 @@ skill/      SKILL.md del skill organizador-documental
 
 ```bash
 python3 tools/build.py          # src/ -> dist/
-bash tests/run_all.sh           # 120 pruebas; requiere pwsh 7 y python3 con reportlab
+bash tests/run_all.sh           # 139 pruebas; requiere pwsh 7 y python3 con reportlab
 ```
 
 ## Desplegar

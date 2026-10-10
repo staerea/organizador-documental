@@ -7,7 +7,7 @@ $script:fallos = 0
 function T($n,$c){ if (-not $c) { $script:fallos++ }; Write-Host ("{0,-66} {1}" -f $n, $(if($c){'OK'}else{'FALLO'})) }
 function Viejo($p) { Get-ChildItem -LiteralPath $p -Recurse -Force | ForEach-Object { $_.LastWriteTime = (Get-Date).AddMinutes(-10) }; (Get-Item -LiteralPath $p).LastWriteTime = (Get-Date).AddMinutes(-10) }
 function Lat { $p = "$O/vigilante_latido_$(Get-Date -Format yyyyMM).csv"; if (Test-Path $p) { @(Import-Csv $p -Delimiter ';') } else { @() } }
-function Cfg([hashtable]$v) { $c = [ordered]@{ RaizDocumental=''; CarpetaEntrada='INPUT'; CarpetaSolicitudes=$DL }; foreach ($k in $v.Keys) { $c[$k] = $v[$k] }
+function Cfg([hashtable]$v) { $c = [ordered]@{ RaizDocumental=''; CarpetaEntrada='INPUT'; CarpetaSolicitudes=$DL; ModoBorrados='ACTIVO' }; foreach ($k in $v.Keys) { $c[$k] = $v[$k] }
   ($c.Keys | ForEach-Object { [pscustomobject]@{ Clave=$_; Valor=$c[$_]; Descripcion='' } }) | Export-Csv "$O/config_plataforma.csv" -Delimiter ';' -NoTypeInformation -Encoding UTF8 }
 function Reset {
   foreach ($d in $R, $DL, $CP) { if (Test-Path $d) { Remove-Item $d -Recurse -Force } }
@@ -41,7 +41,7 @@ T 'T62 plan con nuevos\ aplicado desde INPUT' ((Test-Path "$R/01_PROY/A/Factura_
 Reset; New-Item -ItemType Directory "$R/_DUPLICADOS_REVISAR/01_PROY/A" -Force | Out-Null
 Set-Content "$R/01_PROY/A/Doc.pdf" '%PDF igual'; Copy-Item "$R/01_PROY/A/Doc.pdf" "$R/_DUPLICADOS_REVISAR/01_PROY/A/Doc__COPIA_1.pdf"
 $sol = 'SOLICITUD_BORRADO_DUPLICADOS_20261007_120000.csv'
-@([pscustomobject]@{ RutaDuplicado='_DUPLICADOS_REVISAR\01_PROY\A\Doc__COPIA_1.pdf'; RutaOriginal='01_PROY\A\Doc.pdf'; Tipo='SHA'; Tamano='11'; SHA256=''; Solicitado='2026-10-07T12:00:00' }) |
+@([pscustomobject]@{ RutaDuplicado='_DUPLICADOS_REVISAR\01_PROY\A\Doc__COPIA_1.pdf'; RutaOriginal='01_PROY\A\Doc.pdf'; Tipo='SHA'; Tamano='11'; SHA256=''; Solicitado=(Get-Date).ToUniversalTime().AddMinutes(-15).ToString('s') }) |
   Export-Csv "$DL/$sol" -Delimiter ';' -NoTypeInformation -Encoding UTF8
 Copy-Item "$DL/$sol" "$B/sol_copia.csv" -Force; Viejo $R; Viejo $DL
 Vig

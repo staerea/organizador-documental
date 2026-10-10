@@ -194,11 +194,12 @@ details.historial td{padding:6px 8px;border-bottom:1px solid var(--linea);word-b
   var POR_PAGINA = 40, pagina = 1;
   var marcadas = new Map();          // ruta copia -> {grupo, copia}
   var CLAVE = 'panelDuplicados.solicitadas';
-  var solicitadas = {};
+  var solicitadas = {}, caducadas = {};
   try { solicitadas = JSON.parse(localStorage.getItem(CLAVE) || '{}') || {}; } catch(e) { solicitadas = {}; }
   // las que ya no existen en el panel se olvidan
   (function(){ var vivas = {}; G.forEach(function(g){ g.c.forEach(function(c){ vivas[c.r] = 1; }); });
     Object.keys(solicitadas).forEach(function(k){ if(!vivas[k]) delete solicitadas[k]; });
+    (D.caducadas || []).forEach(function(k){ delete solicitadas[k]; caducadas[k] = 1; });   // v1.11.2: caducadas, se pueden volver a marcar
     try { localStorage.setItem(CLAVE, JSON.stringify(solicitadas)); } catch(e) {} })();
 
   var IMG = /\.(jpe?g|png|gif|webp|bmp|svg)$/i, VID = /\.(mp4|webm|mov|m4v)$/i, PDF = /\.pdf$/i;
@@ -221,6 +222,7 @@ details.historial td{padding:6px 8px;border-bottom:1px solid var(--linea);word-b
   function procede(c){ return c.v === 'SHA' || c.v === 'ZIP' || c.v === 'TAM'; }
   function estadoCopia(c){
     if (solicitadas[c.r]) return ['sol','Solicitado '+solicitadas[c.r],'Solicitud de borrado creada; el vigilante la ejecuta en su siguiente pasada'];
+    if (caducadas[c.r] && procede(c)) return ['ver','Solicitud caducada: márquela de nuevo','La solicitud anterior superó el plazo de '+(D.caducidadHoras||24)+' h sin ejecutarse y no se borró. Si sigue queriendo borrar esta copia, vuelva a marcarla.'];
     if (c.v === 'SHA') return ['ok','Idéntica','Mismo SHA-256 que el original'];
     if (c.v === 'ZIP') return ['ok','Mismo contenido','ZIP con los mismos archivos que el original; se comprueba de nuevo al borrar'];
     if (c.v === 'TAM') return ['ver','Se verifica al borrar','Mismo tamaño que el original; el vigilante compara el contenido completo antes de borrar y no borra si difiere'];
@@ -244,6 +246,7 @@ details.historial td{padding:6px 8px;border-bottom:1px solid var(--linea);word-b
   if (D.sinDatos) { document.getElementById('nota').textContent = 'Falta la carpeta _panel junto a este archivo o todavía no se ha generado. El vigilante la crea en su siguiente pasada.'; }
   else document.getElementById('nota').textContent = 'Generado el ' + D.generado + '. A la izquierda está el documento que se conserva, en su carpeta clasificada; a la derecha, sus copias en _DUPLICADOS_REVISAR. '
     + (nCopias - nProc ? (nCopias - nProc === 1 ? '1 copia no se puede borrar porque su original no está localizado o no coincide; revísela a mano.' : num(nCopias - nProc) + ' copias no se pueden borrar porque su original no está localizado o no coincide; revíselas a mano.') : 'Todas las copias tienen su original localizado.')
+    + (D.modoBorrados === 'INFORME' ? ' Borrados en modo INFORME: las solicitudes se verifican y se informa de lo que se borraría, pero no se borra nada hasta que usted lo autorice.' : '')
     + (D.incompleto ? ' La lista está incompleta: el recorrido superó el tiempo máximo y se completará en la próxima actualización.' : '');
 
   // ---- filtros

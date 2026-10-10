@@ -12,12 +12,16 @@ param([string]$Clave = '', [string]$Valor = '', [switch]$SinRegistrarTarea)
 $ErrorActionPreference = 'Stop'
 # --- v1.11: configuracion de la plataforma (config_plataforma.csv junto a los scripts) ---
 function Get-ConfigPlataforma([string]$dir) {
-  $c = [ordered]@{ RaizDocumental = ''; CarpetaEntrada = 'INPUT'; CarpetaSolicitudes = '%DESCARGAS_NAVEGADOR%' }
+  $c = [ordered]@{ RaizDocumental = ''; CarpetaEntrada = 'INPUT'; CarpetaSolicitudes = '%DESCARGAS_NAVEGADOR%'; IntervaloVigilanteMin = '60'; CaducidadSolicitudHoras = '24'; ModoBorrados = 'INFORME' }
   $p = Join-Path $dir 'config_plataforma.csv'
   if (Test-Path -LiteralPath $p) {
     try { foreach ($f in @(Import-Csv -LiteralPath $p -Delimiter ';' -Encoding UTF8)) {
         $k = "$($f.Clave)".Trim(); if ($k -and $c.Contains($k)) { $c[$k] = "$($f.Valor)".Trim() } } } catch { } }
   if (-not $c.CarpetaEntrada -or $c.CarpetaEntrada -match '[\\/:*?"<>|]' -or $c.CarpetaEntrada -match '^(\.|_|\d\d_)') { $c.CarpetaEntrada = 'INPUT' }
+  # v1.11.2: valores numericos y modo de borrado validados; ante cualquier duda, el modo seguro (INFORME)
+  $n = 0; if (-not [int]::TryParse("$($c.IntervaloVigilanteMin)", [ref]$n) -or $n -lt 10 -or $n -gt 240) { $c.IntervaloVigilanteMin = '60' }
+  $n = 0; if (-not [int]::TryParse("$($c.CaducidadSolicitudHoras)", [ref]$n) -or $n -lt 1 -or $n -gt 720) { $c.CaducidadSolicitudHoras = '24' }
+  if ("$($c.ModoBorrados)" -ine 'ACTIVO') { $c.ModoBorrados = 'INFORME' } else { $c.ModoBorrados = 'ACTIVO' }
   return $c }
 function Get-CarpetaDescargasNavegador {
   # Carpeta "Descargas" de Windows (la que usan por defecto Edge, Chrome y Firefox); admite redireccion a otro disco.
@@ -37,8 +41,11 @@ function Resolve-CarpetasSolicitudes([string]$valor) {
 function Test-GoogleNativo([string]$ruta) { return ([IO.Path]::GetExtension($ruta) -imatch '^\.(gdoc|gsheet|gslides|gdraw|gform|gmap|gsite|gjam|gtable|gscript|glink|gnote)$') }
 $org = $PSScriptRoot; $cfgPath = Join-Path $org 'config_plataforma.csv'
 $desc = [ordered]@{ RaizDocumental = 'Carpeta raiz que organiza el vigilante'; CarpetaEntrada = 'Bandeja de entrada dentro de la raiz';
-                    CarpetaSolicitudes = 'Carpetas donde se recogen los CSV del panel (separadas por | - %DESCARGAS_NAVEGADOR% = Descargas de Windows)' }
-$porDefecto = [ordered]@{ RaizDocumental = 'G:\Mi unidad\DESCARGAS'; CarpetaEntrada = 'INPUT'; CarpetaSolicitudes = '%DESCARGAS_NAVEGADOR%' }
+                    CarpetaSolicitudes = 'Carpetas donde se recogen los CSV del panel (separadas por | - %DESCARGAS_NAVEGADOR% = Descargas de Windows)';
+                    IntervaloVigilanteMin = 'Minutos entre pasadas del vigilante (10-240)';
+                    CaducidadSolicitudHoras = 'Horas tras las que una solicitud de borrado no ejecutada caduca y requiere nueva confirmacion (1-720)';
+                    ModoBorrados = 'INFORME = verifica sin borrar (por defecto tras cada despliegue); ACTIVO = ejecuta los borrados solicitados' }
+$porDefecto = [ordered]@{ RaizDocumental = 'G:\Mi unidad\DESCARGAS'; CarpetaEntrada = 'INPUT'; CarpetaSolicitudes = '%DESCARGAS_NAVEGADOR%'; IntervaloVigilanteMin = '60'; CaducidadSolicitudHoras = '24'; ModoBorrados = 'INFORME' }
 function Guardar($c, [string]$ruta) {
   $filas = foreach ($k in $desc.Keys) { [pscustomobject]@{ Clave = $k; Valor = $c[$k]; Descripcion = $desc[$k] } }
   $tmp = $ruta + '.tmp'; $filas | Export-Csv -LiteralPath $tmp -Delimiter ';' -NoTypeInformation -Encoding UTF8
@@ -49,6 +56,9 @@ function Validar([string]$k, [string]$v, $c) {
     'RaizDocumental' { if (-not $v) { throw 'La raiz no puede quedar vacia.' }
                        if (-not (Test-Path -LiteralPath $v -PathType Container)) { throw "La carpeta '$v' no existe." } }
     'CarpetaSolicitudes' { foreach ($x in @(Resolve-CarpetasSolicitudes $v)) { if (-not (Test-Path -LiteralPath $x -PathType Container)) { Write-Warning "La carpeta '$x' no existe ahora; se usara cuando exista." } } }
+    'IntervaloVigilanteMin' { $n = 0; if (-not [int]::TryParse($v, [ref]$n) -or $n -lt 10 -or $n -gt 240) { throw 'El intervalo debe ser un numero de minutos entre 10 y 240.' } }
+    'CaducidadSolicitudHoras' { $n = 0; if (-not [int]::TryParse($v, [ref]$n) -or $n -lt 1 -or $n -gt 720) { throw 'La caducidad debe ser un numero de horas entre 1 y 720.' } }
+    'ModoBorrados' { if ($v -notin @('INFORME','ACTIVO')) { throw 'ModoBorrados solo admite INFORME o ACTIVO.' } }
     default { throw "Clave desconocida: $k" } } }
 function Cambiar([string]$k, [string]$v) {
   $c = Get-ConfigPlataforma $org; if (-not $c.RaizDocumental) { $c.RaizDocumental = Split-Path $org -Parent }
@@ -61,24 +71,32 @@ function Cambiar([string]$k, [string]$v) {
     Guardar $c (Join-Path $nuevaOrg 'config_plataforma.csv'); Guardar $c $cfgPath
     if (-not $SinRegistrarTarea -and $env:OS -eq 'Windows_NT') { & (Join-Path $nuevaOrg 'Instalar_Vigilante.ps1') }
     Write-Host "Raiz cambiada a $v. El vigilante trabaja ahora con la copia de _ORGANIZACION de la nueva raiz."; return }
+  if ($k -eq 'ModoBorrados') { $v = $v.ToUpper(); $c[$k] = $v }
   Guardar $c $cfgPath; Write-Host ("{0}: '{1}' -> '{2}'" -f $k, $antes, $v)
+  if ($k -eq 'IntervaloVigilanteMin' -and -not $SinRegistrarTarea -and $env:OS -eq 'Windows_NT') { & (Join-Path $org 'Instalar_Vigilante.ps1') }   # v1.11.2: aplica el nuevo intervalo
   if ($k -eq 'CarpetaEntrada') { Write-Host 'En la proxima pasada el vigilante trasladara el contenido de la entrada anterior a la nueva (no borra nada).' } }
 if ($Clave) { Cambiar $Clave $Valor; return }
 while ($true) {
   $c = Get-ConfigPlataforma $org; if (-not $c.RaizDocumental) { $c.RaizDocumental = Split-Path $org -Parent }
-  Write-Host ''; Write-Host '=== CONFIGURACION DE LA PLATAFORMA (organizador-documental v1.11) ===' -ForegroundColor Cyan
+  Write-Host ''; Write-Host '=== CONFIGURACION DE LA PLATAFORMA (organizador-documental v1.11.2) ===' -ForegroundColor Cyan
   Write-Host ("1) Raiz documental      : {0}" -f $c.RaizDocumental)
   Write-Host ("2) Carpeta de entrada   : {0}" -f $c.CarpetaEntrada)
   Write-Host ("3) Recogida de los CSV  : {0}" -f $c.CarpetaSolicitudes)
   Write-Host ("     (ahora mismo: {0}; y siempre la raiz y la entrada)" -f ((@(Resolve-CarpetasSolicitudes $c.CarpetaSolicitudes)) -join ' | '))
-  Write-Host '4) Restaurar valores por defecto'; Write-Host '0) Salir'
+  Write-Host ("4) Intervalo del vigilante: {0} min" -f $c.IntervaloVigilanteMin)
+  Write-Host ("5) Caducidad de solicitudes: {0} h" -f $c.CaducidadSolicitudHoras)
+  Write-Host ("6) Modo de borrado        : {0}" -f $c.ModoBorrados)
+  Write-Host '7) Restaurar valores por defecto'; Write-Host '0) Salir'
   $o = Read-Host 'Opcion'
   try {
     switch ($o) {
       '1' { $v = Read-Host 'Nueva raiz (ruta completa de una carpeta existente)'; if ($v) { Cambiar 'RaizDocumental' $v } }
       '2' { $v = Read-Host 'Nuevo nombre de la carpeta de entrada'; if ($v) { Cambiar 'CarpetaEntrada' $v } }
       '3' { $v = Read-Host 'Carpetas de recogida (separadas por | - %DESCARGAS_NAVEGADOR% = Descargas de Windows)'; if ($v) { Cambiar 'CarpetaSolicitudes' $v } }
-      '4' { Cambiar 'Restaurar' '' }
+      '4' { $v = Read-Host 'Minutos entre pasadas (10-240)'; if ($v) { Cambiar 'IntervaloVigilanteMin' $v } }
+      '5' { $v = Read-Host 'Horas de caducidad de una solicitud no ejecutada (1-720)'; if ($v) { Cambiar 'CaducidadSolicitudHoras' $v } }
+      '6' { $v = Read-Host 'Modo de borrado (INFORME o ACTIVO)'; if ($v) { if ($v -ieq 'ACTIVO') { $ok = Read-Host 'Con ACTIVO se borraran las copias solicitadas en el panel que superen la verificacion. Escriba SI para confirmar'; if ($ok -cne 'SI') { Write-Host 'Sin cambios.'; continue } }; Cambiar 'ModoBorrados' $v } }
+      '7' { Cambiar 'Restaurar' '' }
       '0' { return }
       default { Write-Host 'Opcion no valida.' } }
   } catch { Write-Host ('No se ha cambiado: ' + $_.Exception.Message) -ForegroundColor Yellow } }
