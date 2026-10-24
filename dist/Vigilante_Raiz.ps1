@@ -190,7 +190,7 @@ try {
   if (Test-Path -LiteralPath $hzPath) { foreach ($z in (Import-Csv -LiteralPath $hzPath -Delimiter ';' -Encoding UTF8)) { $hzSha[$z.SHA256] = $z.HuellaZip
       if ($porSha.ContainsKey($z.SHA256) -and -not $porHuella.ContainsKey($z.HuellaZip)) { $porHuella[$z.HuellaZip] = $porSha[$z.SHA256] } } }
   $exclDirRx = '^(\d\d_.*|_.*|99_.*)$'   # carpetas de area y de control (solo carpetas: un ARCHIVO que empiece por _ o NN_ si se procesa)
-  $exclRx = '^(desktop\.ini|thumbs\.db|~\$.*|.*\.(crdownload|part|partial|download|tmp|opdownload)|(INVENTARIAR|SEMBRAR_MANIFIESTO|INSTALAR_VIGILANTE|DESINSTALAR_VIGILANTE|REANUDAR_VIGILANTE|APLICAR.*)\.bat|ALERTA_INTEGRIDAD\.txt|SOLICITUD_BORRADO_DUPLICADOS_.*\.csv)$'
+  $exclRx = '^(desktop\.ini|thumbs\.db|~\$.*|.*\.(crdownload|part|partial|download|tmp|opdownload)|(INVENTARIAR|SEMBRAR_MANIFIESTO|INSTALAR_VIGILANTE|DESINSTALAR_VIGILANTE|REANUDAR_VIGILANTE|CONFIGURAR_PLATAFORMA|DIAGNOSTICAR_VIGILANTE|APLICAR.*)\.bat|ALERTA_INTEGRIDAD\.txt|SOLICITUD_BORRADO_DUPLICADOS_.*\.csv)$'
   $exclTxt = Join-Path $org 'excluir_raiz.txt'; $exclExtra = @(); if (Test-Path -LiteralPath $exclTxt) { $exclExtra = @(Get-Content -LiteralPath $exclTxt | Where-Object { $_ -and $_ -notmatch '^#' }) }
   # --- v1.9.2: conciliacion del manifiesto con el registro del mes (duplicados apartados por pasadas cortadas) ---
   Fase 'CONCILIAR'; $nConc = 0

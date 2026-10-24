@@ -6,7 +6,7 @@ def w(name,txt):
     open(os.path.join(B,name),'wb').write(b'\xef\xbb\xbf'+txt.encode('utf-8'))
 for src,dst in [('Vigilante_Raiz.src.ps1','Vigilante_Raiz.ps1'),('Aplicar_Plan.src.ps1','Aplicar_Plan.ps1'),('Verificar_Integridad.src.ps1','Verificar_Integridad.ps1'),
                 ('Inventariar_Raiz.src.ps1','Inventariar_Raiz.ps1'),('Copia_Verificada.src.ps1','Copia_Verificada.ps1'),('Configurar_Plataforma.src.ps1','Configurar_Plataforma.ps1'),
-                ('Instalar_Vigilante.src.ps1','Instalar_Vigilante.ps1')]:
+                ('Instalar_Vigilante.src.ps1','Instalar_Vigilante.ps1'),('Diagnosticar_Vigilante.ps1','Diagnosticar_Vigilante.ps1')]:
     t=open(os.path.join(D,src),encoding='utf-8-sig').read()
     if '#COMUN#' in t: t=t.replace('#COMUN#',comun,1)
     w(dst,t)
@@ -15,7 +15,7 @@ p=open(os.path.join(D,'plantilla.html'),encoding='utf-8').read(); t=open(os.path
 assert "\n'@" not in p
 w('Generar_Panel_Duplicados.ps1',h+p+t)
 w('PANEL_DUPLICADOS.html',p)
-for b in ['CONFIGURAR_PLATAFORMA.bat']:
+for b in ['CONFIGURAR_PLATAFORMA.bat','DIAGNOSTICAR_VIGILANTE.bat']:
     t=open(os.path.join(D,b),encoding='utf-8').read().replace('\r\n','\n').replace('\n','\r\n'); open(os.path.join(B,b),'wb').write(t.encode())
 import shutil; shutil.copy(os.path.join(R0,'config','config_plataforma.csv'),B)
 print(sorted(os.listdir(B)))

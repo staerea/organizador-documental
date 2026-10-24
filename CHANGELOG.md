@@ -2,6 +2,12 @@
 
 Formato: [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/); versiones `MAYOR.MENOR.PARCHE`.
 
+## [1.11.4] - 2026-10-25 (en preparación; solo desplegado lo indicado)
+- Nuevo `DIAGNOSTICAR_VIGILANTE.bat` + `Diagnosticar_Vigilante.ps1` (solo lectura): estado y último resultado de la tarea programada, disponibilidad de VBScript, bloqueos/pausa, últimas líneas del latido e historial del Programador. Escribe `_ORGANIZACION\diagnostico_vigilante_<fecha>.txt`. **Desplegado** (no tiene efectos).
+- Vigilante: `CONFIGURAR_PLATAFORMA.bat` y `DIAGNOSTICAR_VIGILANTE.bat` se excluyen de la recogida de la raíz (el primero acabó en `INPUT` desde la v1.11). En el equipo se aplica de momento con `_ORGANIZACION\excluir_raiz.txt`; el cambio del script queda **pendiente de despliegue** por la puerta de despliegue.
+- Incidencia 17-10/20-10: 238 bytes NUL intercalados en `manifiesto_documental.csv` (fila del original de `dock_technical_paper.pdf`) provocaban `ERROR_ELEMENTO: Caracteres no válidos en la ruta de acceso` en cada pasada. Reparado eliminando solo los NUL (28.598 filas íntegras, 9 campos); copia del archivo dañado en `_ORGANIZACION\alertas\manifiesto_documental_CON_NUL_20261025.csv`.
+- Pendiente: el vigilante no ejecuta pasadas desde el 20-10 20:36 aunque el equipo se ha usado después; diagnóstico con el nuevo .bat.
+
 ## [1.11.3] — 2026-10-10
 ### Cambiado
 - Tarea horaria con **triaje ligero** (ahorro de cuota): comprueba salud, planes pendientes, entrada, M14 e informes diarios leyendo solo archivos pequeños (los grandes se analizan en el contenedor sin volcarlos) y **solo carga el skill si hay un bloque que clasificar**; sin trabajo ni avisos termina sin informe. No cambia ningún resultado ni ningún script del equipo.
