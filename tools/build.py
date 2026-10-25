@@ -23,6 +23,9 @@ print(sorted(os.listdir(B)))
 os.makedirs(os.path.join(B,'m14'),exist_ok=True)
 for f in os.listdir(os.path.join(D,'m14')):
     if f.endswith('.py'): shutil.copy(os.path.join(D,'m14',f),os.path.join(B,'m14',f))
+os.makedirs(os.path.join(B,'m12'),exist_ok=True)
+for f in os.listdir(os.path.join(D,'m12')):
+    if f.endswith('.py'): shutil.copy(os.path.join(D,'m12',f),os.path.join(B,'m12',f))
 for f in os.listdir(os.path.join(R0,'config')):
     shutil.copy(os.path.join(R0,'config',f),os.path.join(B,f))
 for f in ['Deshacer.ps1','Desinstalar_Vigilante.ps1','REANUDAR_VIGILANTE.bat']:

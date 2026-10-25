@@ -36,7 +36,7 @@ skill/      SKILL.md del skill organizador-documental
 
 ```bash
 python3 tools/build.py          # src/ -> dist/
-bash tests/run_all.sh           # 139 pruebas; requiere pwsh 7 y python3 con reportlab
+bash tests/run_all.sh           # 158 pruebas; requiere pwsh 7 y python3 con reportlab
 ```
 
 ## Desplegar

@@ -10,7 +10,7 @@ M8;Bandeja vigilada;SI;AUTOMATICO;
 M9;Panel del archivo;BAJO_DEMANDA;;
 M10;Expedientes virtuales;BAJO_DEMANDA;;
 M11;Fichas resumen;BAJO_DEMANDA;;
-M12;Casi duplicados;BAJO_DEMANDA;;
+M12;Casi duplicados;SI;INFORME;Frecuencia=DIARIA
 M13;Retencion y ciclo de vida;BAJO_DEMANDA;;
 M14;Indice de metadatos y entidades;SI;INCREMENTAL;Lote=60|MaxMB=300|Ocr=NO
 M15;Copia de seguridad verificable;NO;AUTOMATICO;Destino=|Areas=01_STAEREA_PROYECTOS,02_STAEREA_ADMIN,08_ASESORIA_LABORAL_FISCAL,09_PERSONAL_SENSIBLE|Frecuencia=DIARIA|MaxGBPorPasada=50

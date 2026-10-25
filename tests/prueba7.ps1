@@ -38,6 +38,6 @@ Set-Content "$R/INPUT/grande.bin" ("x" * 5000); (Get-Item "$R/INPUT/grande.bin")
 $p2="$O/plan_t52.csv"; [pscustomobject]@{Origen='INPUT\grande.bin';Tipo='archivo';Destino='01_PROY\A';NuevoNombre='Grande.bin';Accion='MOVER';OriginalConservado='';SHA256='';Area='01_PROY'} | Export-Csv $p2 -Delimiter ';' -NoTypeInformation -Encoding UTF8
 & "$O/Aplicar_Plan.ps1" -Plan $p2 -Raiz $R -Ejecutar -MaxHashMB 0 | Out-Null
 $m = Import-Csv "$O/manifiesto_documental.csv" -Delimiter ';' | ? { $_.RutaRelativa -like '*Grande.bin' }
-T 'T52 archivo grande: se mueve y el SHA queda diferido' ((Test-Path "$R/01_PROY/A/Grande.bin") -and -not $m.SHA256 -and $m.VersionSkill -eq '1.11-sha-diferido')
+T 'T52 archivo grande: se mueve y el SHA queda diferido' ((Test-Path "$R/01_PROY/A/Grande.bin") -and -not $m.SHA256 -and $m.VersionSkill -eq '1.11.4-sha-diferido')
 $m4 = Import-Csv "$O/manifiesto_documental.csv" -Delimiter ';' | ? { $_.RutaRelativa -like '*N_4.txt' }
-T 'T52b archivo normal: SHA calculado (1.10.1)' ($m4.SHA256 -and $m4.VersionSkill -eq '1.11')
+T 'T52b archivo normal: SHA calculado (1.10.1)' ($m4.SHA256 -and $m4.VersionSkill -eq '1.11.4')

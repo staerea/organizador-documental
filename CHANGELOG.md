@@ -2,7 +2,10 @@
 
 Formato: [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/); versiones `MAYOR.MENOR.PARCHE`.
 
-## [1.11.4] - 2026-10-25 (en preparación; solo desplegado lo indicado)
+## [1.11.4] - 2026-10-25 (construida y probada: 158/158; despliegue pendiente de la puerta de despliegue)
+- `Aplicar_Plan`: toda fila `MOVER` de un archivo se compara por SHA-256 con los archivos vigentes del manifiesto y con las filas anteriores del mismo plan; si ya existe, se aparta a `_DUPLICADOS_REVISAR` como `__COPIA_n` verificada (registro `DUPLICADO_DETECTADO_AL_APLICAR`) en lugar de entrar con `_vN`. 9 pruebas nuevas (prueba11).
+- M12 operativo: `modulos\M12\m12_casi_duplicados.py` (candidatos / comparar / par), solo lectura; `config_modulos`: M12 `SI;INFORME;Frecuencia=DIARIA`. 10 pruebas nuevas (test_m12).
+- Tarea horaria y skill: no se numera `_vN` sin comparar contenido; las copias de contenido igual quedan en espera y van al informe del M12 para confirmación del usuario.
 - Nuevo `DIAGNOSTICAR_VIGILANTE.bat` + `Diagnosticar_Vigilante.ps1` (solo lectura): estado y último resultado de la tarea programada, disponibilidad de VBScript, bloqueos/pausa, últimas líneas del latido e historial del Programador. Escribe `_ORGANIZACION\diagnostico_vigilante_<fecha>.txt`. **Desplegado** (no tiene efectos).
 - Vigilante: `CONFIGURAR_PLATAFORMA.bat` y `DIAGNOSTICAR_VIGILANTE.bat` se excluyen de la recogida de la raíz (el primero acabó en `INPUT` desde la v1.11). En el equipo se aplica de momento con `_ORGANIZACION\excluir_raiz.txt`; el cambio del script queda **pendiente de despliegue** por la puerta de despliegue.
 - Incidencia 17-10/20-10: 238 bytes NUL intercalados en `manifiesto_documental.csv` (fila del original de `dock_technical_paper.pdf`) provocaban `ERROR_ELEMENTO: Caracteres no válidos en la ruta de acceso` en cada pasada. Reparado eliminando solo los NUL (28.598 filas íntegras, 9 campos); copia del archivo dañado en `_ORGANIZACION\alertas\manifiesto_documental_CON_NUL_20261025.csv`.

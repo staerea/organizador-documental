@@ -92,6 +92,22 @@ function Reg($o,$d,$e) { $r = [pscustomobject]@{Origen=$o;Destino=$d;Estado=$e};
 $nuevosMan = New-Object System.Collections.Generic.List[object]
 function Sha([string]$p) { (Get-FileHash -LiteralPath $p -Algorithm SHA256).Hash.ToLower() }
 function ShaMan([string]$p) { if (Test-GoogleNativo $p) { return '' }; if ((Get-Item -LiteralPath $p).Length -gt $MaxHashMB * 1MB) { return '' }; Sha $p }   # v1.10.1
+# v1.11.4: indice SHA-256 -> ruta de los archivos vigentes del manifiesto. Toda fila MOVER de un archivo se compara con el:
+#          si su contenido ya existe en el archivo (o en una fila anterior del mismo plan), se aparta a _DUPLICADOS_REVISAR
+#          como copia verificada en vez de entrar con un sufijo _vN. Evita que dos archivos identicos parezcan versiones.
+$idxSha = @{}
+if (Test-Path -LiteralPath $man) {
+  $ultimo = @{}
+  foreach ($m in @(Import-Csv -LiteralPath $man -Delimiter ';' -Encoding UTF8)) { if ($m.RutaRelativa) { $ultimo[$m.RutaRelativa.ToLower()] = $m } }
+  foreach ($m in $ultimo.Values) {
+    if ($m.SHA256 -and $m.Estado -in @('HEREDADO','MOVIDO','MOVIDO_HASH_NO_VERIFICADO','MOVIDO_HUELLA_NO_VERIFICADA') -and $m.RutaRelativa -notmatch '^_DUPLICADOS_REVISAR[\\/]') {
+      $k = $m.SHA256.ToLower(); if (-not $idxSha.ContainsKey($k)) { $idxSha[$k] = $m.RutaRelativa } } } }
+function CopiaLibre([string]$origRel) {
+  $partes = @($origRel -split '[\\/]' | Where-Object { $_ }); $hoja = $partes[-1]; $d = ($partes[0..([Math]::Max(0,$partes.Count-2))] -join '\'); if ($partes.Count -lt 2) { $d = '' }
+  $b = [IO.Path]::GetFileNameWithoutExtension($hoja); $e = [IO.Path]::GetExtension($hoja)
+  $dir = Join-Path (Join-Path $Raiz '_DUPLICADOS_REVISAR') $d; $n = 1
+  while (Test-Path -LiteralPath (Join-Path $dir ('{0}__COPIA_{1}{2}' -f $b,$n,$e))) { $n++ }
+  return @{ Rel = (Join-Path '_DUPLICADOS_REVISAR' $d); Nombre = ('{0}__COPIA_{1}{2}' -f $b,$n,$e) } }
 $reloj = [Diagnostics.Stopwatch]::StartNew(); $i = -1
 function Libre([string]$dir,[string]$n,[bool]$carpeta) {
   $t = Join-Path $dir $n; if (-not (Test-Path -LiteralPath $t)) { return $t }
@@ -117,17 +133,26 @@ foreach ($f in $filas) {
     else { $ok = (Test-Path -LiteralPath $orig) -and ((Get-Item -LiteralPath $src).Length -eq (Get-Item -LiteralPath $orig).Length) -and ((Sha $src) -eq (Sha $orig)) }
     if ($ok) { $estado = 'DUPLICADO_VERIFICADO' } else { $destRel = $destRel -replace '^_DUPLICADOS_REVISAR[\\/]',''; $nuevo = $nuevo -replace '__COPIA_','__DIFERENTE_'; $estado='MOVIDO_HASH_NO_VERIFICADO' }
   }
+  $shaCalc = ''
+  if ($f.Accion -notlike 'DUPLICADO*' -and -not $carpeta -and -not (Test-GoogleNativo $src)) {   # v1.11.4
+    $shaCalc = ShaMan $src
+    if ($shaCalc -and $idxSha.ContainsKey($shaCalc)) {
+      $origRel = $idxSha[$shaCalc]; $origAbs = Join-Path $Raiz $origRel
+      if ((Test-Path -LiteralPath $origAbs) -and ((Sha $origAbs) -eq $shaCalc)) {
+        $c = CopiaLibre $origRel; $destRel = $c.Rel; $nuevo = $c.Nombre; $estado = 'DUPLICADO_VERIFICADO'
+        Reg $src $origAbs 'DUPLICADO_DETECTADO_AL_APLICAR' } } }
   $destDir = Join-Path $Raiz $destRel; $target = Libre $destDir $nuevo $carpeta
   if ($Ejecutar) {
     try { if (-not (Test-Path -LiteralPath $destDir)) { New-Item -ItemType Directory -Path $destDir -Force | Out-Null }
           Move-Item -LiteralPath $src -Destination $target
           $items = if ($carpeta) { @(Get-ChildItem -LiteralPath $target -Recurse -File -Force) } else { @(Get-Item -LiteralPath $target) }
           foreach ($fi in $items) {
-            $filaMan = ([pscustomobject]@{ RutaRelativa=$fi.FullName.Substring($Raiz.Length).TrimStart('\','/'); SHA256=$(if($f.SHA256 -and -not $carpeta){$f.SHA256.ToLower()}else{ShaMan $fi.FullName});
+            $filaMan = ([pscustomobject]@{ RutaRelativa=$fi.FullName.Substring($Raiz.Length).TrimStart('\','/'); SHA256=$(if($f.SHA256 -and -not $carpeta){$f.SHA256.ToLower()}elseif($shaCalc -and -not $carpeta){$shaCalc}else{ShaMan $fi.FullName});
               Tamano=$fi.Length; FechaMod=[int64]($fi.LastWriteTimeUtc-[datetime]'1970-01-01').TotalMilliseconds; Area=$f.Area; Estado=$estado;
-              NombreOriginal=$(if($carpeta){(Split-Path -Leaf $src)+'/'+$fi.Name}else{Split-Path -Leaf $src}); FechaClasificacion=(Get-Date -Format 'yyyy-MM-dd'); VersionSkill=$(if ($fi.Length -gt $MaxHashMB * 1MB -and -not $f.SHA256) { '1.11-sha-diferido' } else { '1.11' }) })
+              NombreOriginal=$(if($carpeta){(Split-Path -Leaf $src)+'/'+$fi.Name}else{Split-Path -Leaf $src}); FechaClasificacion=(Get-Date -Format 'yyyy-MM-dd'); VersionSkill=$(if ($fi.Length -gt $MaxHashMB * 1MB -and -not $f.SHA256) { '1.11.4-sha-diferido' } else { '1.11.4' }) })
             $nuevosMan.Add($filaMan); if (Test-Path -LiteralPath $man) { $filaMan | Export-Csv -LiteralPath $man -Delimiter ';' -NoTypeInformation -Encoding UTF8 -Append } else { $filaMan | Export-Csv -LiteralPath $man -Delimiter ';' -NoTypeInformation -Encoding UTF8 } } }
     catch { $estado = 'ERROR: ' + $_.Exception.Message }
+    if ($shaCalc -and $estado -eq 'MOVIDO' -and -not $idxSha.ContainsKey($shaCalc)) { $idxSha[$shaCalc] = $target.Substring($Raiz.Length).TrimStart('\','/') }   # v1.11.4
   } else { $estado = 'SIMULADO_' + $estado }
   Reg $src $target $estado
 }
