@@ -2,6 +2,10 @@
 
 Formato: [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/); versiones `MAYOR.MENOR.PARCHE`.
 
+## [1.11.5] - 2026-10-25 (corrección; pendiente de despliegue)
+- `Aplicar_Plan`: un archivo nunca se considera duplicado de sí mismo. En la v1.11.4, al mover dentro del archivo un fichero ya registrado en el manifiesto, el índice SHA-256 lo encontraba a él mismo y lo apartaba como `__COPIA_1` con estado `DUPLICADO_VERIFICADO` (incidencia del plan M12 del 25-10: 65 copias similares con nombre y estado incorrectos; ningún archivo perdido). Prueba de regresión T119 (falla con la v1.11.4, pasa con la v1.11.5).
+- Plan de corrección `plan_20261025_1205_correccion_nombres_m12.csv`: renombra 63 copias a `__COPIA_SIMILAR_n` y restaura a su sitio 2 archivos que el informe ad hoc del M12 había propuesto apartar sin tener el mismo número de páginas que el conservado (el comparador `m12_casi_duplicados.py` ya exige páginas iguales).
+
 ## [1.11.4] - 2026-10-25 (construida y probada: 158/158; despliegue pendiente de la puerta de despliegue)
 - `Aplicar_Plan`: toda fila `MOVER` de un archivo se compara por SHA-256 con los archivos vigentes del manifiesto y con las filas anteriores del mismo plan; si ya existe, se aparta a `_DUPLICADOS_REVISAR` como `__COPIA_n` verificada (registro `DUPLICADO_DETECTADO_AL_APLICAR`) en lugar de entrar con `_vN`. 9 pruebas nuevas (prueba11).
 - M12 operativo: `modulos\M12\m12_casi_duplicados.py` (candidatos / comparar / par), solo lectura; `config_modulos`: M12 `SI;INFORME;Frecuencia=DIARIA`. 10 pruebas nuevas (test_m12).

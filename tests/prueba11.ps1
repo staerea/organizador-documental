@@ -36,4 +36,14 @@ T 'T116 registro con DUPLICADO_DETECTADO_AL_APLICAR (2)' (@($reg | Where-Object 
 $man = @(Import-Csv "$O/manifiesto_documental.csv" -Delimiter ';')
 T 'T117 manifiesto: copias DUPLICADO_VERIFICADO con su SHA' ((@($man | Where-Object { $_.Estado -eq 'DUPLICADO_VERIFICADO' -and $_.SHA256 }).Count -eq 2))
 T 'T118 no se borra nada (6 archivos en total) y el original intacto' ((@(Get-ChildItem $R -Recurse -File -Filter *.pdf).Count -eq 6) -and ((Get-Content "$R/01_PROY/A/Orig.pdf" -Raw) -eq 'contenido X'))
+
+# T119 (v1.11.5): un archivo ya clasificado que se mueve dentro del archivo no es duplicado de si mismo (incidencia 25-10)
+Set-Content "$R/01_PROY/A/Propio_v2.pdf" 'contenido P' -NoNewline
+[pscustomobject]@{RutaRelativa='01_PROY\A\Propio_v2.pdf';SHA256=(Hx "$R/01_PROY/A/Propio_v2.pdf");Tamano=11;FechaMod=0;Area='01_PROY';Estado='MOVIDO';NombreOriginal='p.pdf';FechaClasificacion='2026-10-11';VersionSkill='1.11'} | Export-Csv "$O/manifiesto_documental.csv" -Delimiter ';' -NoTypeInformation -Encoding UTF8 -Append
+$p3 = "$O/plan_t119.csv"
+[pscustomobject]@{ Origen='01_PROY\A\Propio_v2.pdf'; Tipo='archivo'; Destino='_DUPLICADOS_REVISAR\01_PROY\A'; NuevoNombre='Nuevo__COPIA_SIMILAR_1.pdf'; Accion='MOVER'; OriginalConservado='01_PROY\A\Nuevo.pdf'; SHA256=''; Area='_DUPLICADOS_REVISAR' } | Export-Csv $p3 -Delimiter ';' -NoTypeInformation -Encoding UTF8
+Start-Sleep -Seconds 1.2; Get-ChildItem "$O/registro_*.csv" | Remove-Item
+& "$O/Aplicar_Plan.ps1" -Plan $p3 -Raiz $R -Ejecutar | Out-Null
+$reg3 = @(Get-ChildItem "$O/registro_*.csv" | ForEach-Object { Import-Csv $_.FullName -Delimiter ';' })
+T 'T119 movimiento interno: sin autodeteccion, nombre del plan y estado MOVIDO' ((Test-Path "$R/_DUPLICADOS_REVISAR/01_PROY/A/Nuevo__COPIA_SIMILAR_1.pdf") -and (@($reg3 | Where-Object Estado -eq 'DUPLICADO_DETECTADO_AL_APLICAR').Count -eq 0) -and (@($reg3 | Where-Object Estado -eq 'MOVIDO').Count -eq 1))
 Write-Host ("FALLOS: {0}" -f $script:fallos)

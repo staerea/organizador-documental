@@ -138,7 +138,8 @@ foreach ($f in $filas) {
     $shaCalc = ShaMan $src
     if ($shaCalc -and $idxSha.ContainsKey($shaCalc)) {
       $origRel = $idxSha[$shaCalc]; $origAbs = Join-Path $Raiz $origRel
-      if ((Test-Path -LiteralPath $origAbs) -and ((Sha $origAbs) -eq $shaCalc)) {
+      $mismo = ([IO.Path]::GetFullPath($origAbs)).TrimEnd('\','/') -ieq ([IO.Path]::GetFullPath($src)).TrimEnd('\','/')   # v1.11.5: nunca duplicado de si mismo
+      if (-not $mismo -and (Test-Path -LiteralPath $origAbs) -and ((Sha $origAbs) -eq $shaCalc)) {
         $c = CopiaLibre $origRel; $destRel = $c.Rel; $nuevo = $c.Nombre; $estado = 'DUPLICADO_VERIFICADO'
         Reg $src $origAbs 'DUPLICADO_DETECTADO_AL_APLICAR' } } }
   $destDir = Join-Path $Raiz $destRel; $target = Libre $destDir $nuevo $carpeta
